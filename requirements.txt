@@ -1,3 +1,4 @@
 python==3.10.4
 jupyterlab==3.4.7
 matplotlib==3.5.2
+sympy==1.10.1
