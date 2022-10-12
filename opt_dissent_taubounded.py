@@ -28,7 +28,7 @@ def opt_dissent(ax, pi, tau_l, tau_u, s, beta, color='tab:blue'):
     """
     if pi == 'constant':
         ax.plot([0, tau_l], [0, tau_l], c=color)
-        if tau_u > tau_l + s/beta:
+        if tau_u >= tau_l + s/beta:
             ax.plot([tau_l, 1], [tau_l, 1], c=color)
         else:
             ax.plot([tau_l, tau_l + s/beta], [tau_l, tau_l], c=color)
@@ -80,7 +80,7 @@ def max_utility(ax, pi, tau_l, tau_u, s, beta, color='tab:green'):
     """
     if pi == 'constant':
         ax.plot([0, tau_l], [beta, beta], c=color)
-        if tau_u > tau_l + s/beta:
+        if tau_u >= tau_l + s/beta:
             ax.plot([tau_l, tau_u, 1], [beta, beta - s, beta - s], c=color)
         else:
             ax.plot([tau_l, tau_l + s/beta, 1], [beta, beta - s, beta - s], \
@@ -132,19 +132,19 @@ if __name__ == "__main__":
                            facecolor='white', tight_layout=True)
 
     # Plot optimal action dissent and utility for constant pi and
-    # s/beta < tau_u - tau_l.
+    # s/beta <= tau_u - tau_l.
     opt_dissent(ax[0,0], 'constant', tau_l=0.2, tau_u=0.65, s=0.3, beta=1)
     max_utility(ax[1,0], 'constant', tau_l=0.2, tau_u=0.65, s=0.3, beta=1)
-    ax[0,0].set(title=r'(a) $\pi$ constant with $s/\beta < \tau_u - \tau_\ell$',\
+    ax[0,0].set(title=r'(a) $\pi$ constant with $s/\beta \leq \tau_u - \tau_\ell$',\
                 ylabel=r'Optimal Action Dissent, $\tilde{{a}}_{{i,t}}^*$')
     ax[1,0].set(xlabel=r'Desire to Dissent, $d_i$', \
                 ylabel=r'Maximum Expected Utility, $E[U_{{i,t}}]^*$')
 
     # Plot optimal action dissent and utility for constant pi and
-    # s/beta >= tau_u - tau_l.
+    # s/beta > tau_u - tau_l.
     opt_dissent(ax[0,1], 'constant', tau_l=0.2, tau_u=0.65, s=0.6, beta=1)
     max_utility(ax[1,1], 'constant', tau_l=0.2, tau_u=0.65, s=0.6, beta=1)
-    ax[0,1].set(title=r'(b) $\pi$ constant with $s/\beta \geq \tau_u - \tau_\ell$')
+    ax[0,1].set(title=r'(b) $\pi$ constant with $s/\beta > \tau_u - \tau_\ell$')
     ax[1,1].set(xlabel=r'Desire to Dissent, $d_i$')
 
     # Plot optimal action dissent and utility for linear pi and s < beta.
