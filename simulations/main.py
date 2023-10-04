@@ -54,10 +54,10 @@ class Authority:
         Calculates the probability of a punishment being enacted.
         """
         return v + (1 - v) * a_i
+    
+    def noise():
 
-    def view():
-
-        pass
+        return np.random.normal(0, 1)
 
     def opt_tolerance():
         """
@@ -70,6 +70,20 @@ class Authority:
         Calculates authority's optimal severity as a function of known parameters.
         """
         pass
+
+    
+    def get_tolerance():
+        """
+        Returns the authority's tolerance.
+        """
+        return Authority.tau + Authority.noise()
+
+
+    def get_severity():
+        """
+        Returns the authority's severity.
+        """
+        return Authority.s + Authority.noise()
 
 
 """
@@ -163,11 +177,13 @@ if __name__ == "__main__":
     # Total amount of indivduals.
     num_individuals = 10000 
 
+    # Create an array of Individual objects with evenly spaced desires
+    individuals = [Individual() for _ in range(num_individuals)]
+
     # Generate evenly spaced desires for a large number of individuals
     desires = np.linspace(0, 1, num_individuals) 
 
-    # Create an array of Individual objects with evenly spaced desires
-    individuals = [Individual() for _ in range(num_individuals)]
+    
     
     for i in range(num_individuals):
         individuals[i].d_i = desires[i]
