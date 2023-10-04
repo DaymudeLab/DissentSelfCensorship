@@ -182,8 +182,6 @@ if __name__ == "__main__":
 
     # Generate evenly spaced desires for a large number of individuals
     desires = np.linspace(0, 1, num_individuals) 
-
-    
     
     for i in range(num_individuals):
         individuals[i].d_i = desires[i]
