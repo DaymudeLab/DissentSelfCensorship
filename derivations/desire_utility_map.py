@@ -72,6 +72,30 @@ def heat_map_value(delta, t, opt_a):
     elif opt_a == delta and opt_a > t:
         return 1
 
+def heat_map_value_for_t(delta, t, opt_a):
+    """
+    Get the color of heat map based on the optimal action of the individual, relative to their desire to dissent and the authority's tolerance.
+
+    :param delta: the individual's float desire to dissent (in [0,1])
+    :param t: the authority's float tolerance (in [0,1])
+    :param opt_a: the individual's float optimal action dissent (in [0,delta])
+    """
+
+    # Compliant Individuals
+    if delta <= t:
+        return 0
+    # Self-Censoring Individuals
+    elif opt_a == t and delta > t:
+        return 0.25
+    # Partial Self-Censoring Individuals
+    elif opt_a > t and opt_a < delta:
+        position_percentage = ((opt_a - t) / (delta - t)) * 100
+
+        # Interpolate between t and 1 based on position_percentage
+        return 0.25 + (position_percentage / 100) * (1 - 0.25)
+    # Defiant Individuals
+    elif opt_a == delta and opt_a > t:
+        return 1
 
 def plot_opt_dissent_vs_utility(ax, beta, nu, pi, t, s, utility_str):
     """
@@ -85,17 +109,20 @@ def plot_opt_dissent_vs_utility(ax, beta, nu, pi, t, s, utility_str):
     :param s: the authority's float punishment severity (> 0)
     :param utility_str: the string to use for the utility axis (["nu", "t", "s", "beta"])
     """
+
+    y_limit = 1
+    if utility_str == "beta" or utility_str == "s":
+        y_limit = 5
+
     # Evaluate the individual's optimal action dissent over a range of nu and delta.
     desires = np.linspace(0, 1, 1000)
 
     acts = np.empty((1000, 1000))
 
 
-    utility = np.linspace(0, 1, 1000)
+    utility = np.linspace(0, y_limit, 1000)
 
-    utility_map = {"nu": nu, "t": t, "s": s, "beta": beta}
-    selected_utility = utility_map.get(utility_str, None)
-
+    
     # Get the heat map values for the given utility
     if utility_str == "nu":
         for i, nu in enumerate(utility):
@@ -104,7 +131,7 @@ def plot_opt_dissent_vs_utility(ax, beta, nu, pi, t, s, utility_str):
     elif utility_str == "t":
         for i, t in enumerate(utility):
             for j, delta in enumerate(desires):
-                acts[i, j] = heat_map_value(delta, t, opt_dissent(delta, beta, nu, pi, t, s))
+                acts[i, j] = heat_map_value_for_t(delta, t, opt_dissent(delta, beta, nu, pi, t, s))
     elif utility_str == "s":
         for i, s in enumerate(utility):
             for j, delta in enumerate(desires):
@@ -114,21 +141,43 @@ def plot_opt_dissent_vs_utility(ax, beta, nu, pi, t, s, utility_str):
             for j, delta in enumerate(desires):
                 acts[i, j] = heat_map_value(delta, t, opt_dissent(delta, beta, nu, pi, t, s))
 
-    # Define custom colors for the colormap
-    cmap_colors = [(0.0, 'white'), (t, 'red'), (1.0, 'darkred')]
 
-    # Create a custom colormap using LinearSegmentedColormap
-    cmap = mcolors.LinearSegmentedColormap.from_list('custom_heatmap', cmap_colors)
 
-    im = ax.imshow(acts, cmap=cmap, extent=[0, 1, 0, 1], origin='lower')
+    if utility_str != "t":
+        # Define custom colors for the colormap
+        cmap_colors = [(0.0, 'orange'), (t, 'red'), (1.0, 'darkred')]
 
-    cbar = ax.figure.colorbar(im, ax=ax)
-    cbar.set_label('Defiance')
+        # Create a custom colormap using LinearSegmentedColormap
+        cmap = plt.cm.colors.LinearSegmentedColormap.from_list('custom_heatmap', cmap_colors)
 
-    ax.grid()
+        im = ax.pcolormesh(desires, utility, acts, cmap=cmap, shading='auto')
+
+        # Dotted line for tolerance
+        #ax.axvline(t, color='white', linestyle='--')
+
+        # X-axis ticks
+        ax.set_xticks([0, t, 1])
+        ax.set_xticklabels(['0.0', r'$t_r$', '1.0'])
+        cbar = ax.figure.colorbar(im, ax=ax)
+        cbar.set_ticks([0, t, 1])
+    else:
+        # Define custom colors for the colormap
+        cmap_colors = [(0.0, 'orange'), (0.25, 'red'), (1.0, 'darkred')]
+
+        # Create a custom colormap using LinearSegmentedColormap
+        cmap = plt.cm.colors.LinearSegmentedColormap.from_list('custom_heatmap', cmap_colors)
+
+        im = ax.pcolormesh(desires, utility, acts, cmap=cmap, shading='auto')
+        cbar = ax.figure.colorbar(im, ax=ax)
+        cbar.set_ticks([0, 0.25, 1])
+
+    ax.set(xlim=[0, 1], ylim=[0, y_limit])
+
+    cbar.set_label('')
+    cbar.set_ticklabels(['Compliant', 'Self-Censoring', 'Defiant'])
 
 if __name__ == "__main__":
-    titles = [r'Surveillance, $nu$', r'Tolerance, $t_r$', r'Severity, $s_r$', r'Boldness, $\beta_i$']
+    titles = [r'Surveillance, $\nu$', r'Tolerance, $t_r$', r'Severity, $s_r$', r'Boldness, $\beta_i$']
     utilities = ["nu", "t", "s", "beta"]
 
     for i, utility in enumerate(utilities):
@@ -141,11 +190,13 @@ if __name__ == "__main__":
         ax[0].set(title=r'(a) Constant Punishment',
             xlabel=r'Desire to Dissent, $\delta_i$',
             ylabel=titles[i])
-
+    
         # Plot desire to dissent and surveillance for linear punishment.
         plot_opt_dissent_vs_utility(ax[1], nu=0.5, beta=1, pi='linear', t=0.25, s=1, utility_str=utility)
         ax[1].set(title=r'(b) Linear Punishment',
-            xlabel=r'Desire to Dissent, $\delta_i$',
-            ylabel=titles[i])
-
+            xlabel=r'Desire to Dissent, $\delta_i$')
+        
+        ax[0].set_box_aspect(1)
+        ax[1].set_box_aspect(1)
+        
         fig.savefig(osp.join('.', 'figs', f'desire_{utility}_heat_map.png'))
