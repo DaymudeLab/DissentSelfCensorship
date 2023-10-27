@@ -111,8 +111,10 @@ def plot_opt_dissent_vs_utility(ax, beta, nu, pi, t, s, utility_str):
     """
 
     y_limit = 1
-    if utility_str == "beta" or utility_str == "s":
+    if utility_str == "beta":
         y_limit = 5
+    elif utility_str == "s":
+        y_limit = 3
 
     # Evaluate the individual's optimal action dissent over a range of nu and delta.
     desires = np.linspace(0, 1, 1000)
@@ -172,9 +174,9 @@ def plot_opt_dissent_vs_utility(ax, beta, nu, pi, t, s, utility_str):
         cbar.set_ticks([0, 0.25, 1])
 
     ax.set(xlim=[0, 1], ylim=[0, y_limit])
-
+    
     cbar.set_label('')
-    cbar.set_ticklabels(['Compliant', 'Self-Censoring', 'Defiant'])
+    cbar.set_ticklabels(['Compliant', 'Completely Censoring', 'Defiant'])
 
 if __name__ == "__main__":
     titles = [r'Surveillance, $\nu$', r'Tolerance, $t_r$', r'Severity, $s_r$', r'Boldness, $\beta_i$']
@@ -192,11 +194,11 @@ if __name__ == "__main__":
             ylabel=titles[i])
     
         # Plot desire to dissent and surveillance for linear punishment.
-        plot_opt_dissent_vs_utility(ax[1], nu=0.5, beta=1, pi='linear', t=0.25, s=1, utility_str=utility)
+        plot_opt_dissent_vs_utility(ax[1], nu=0.5, beta=1, pi='linear', t=0.25, s=1.5, utility_str=utility)
         ax[1].set(title=r'(b) Linear Punishment',
             xlabel=r'Desire to Dissent, $\delta_i$')
         
         ax[0].set_box_aspect(1)
         ax[1].set_box_aspect(1)
         
-        fig.savefig(osp.join('.', 'figs', f'desire_{utility}_heat_map.png'))
+        fig.savefig(osp.join('.', 'figs/heatmap', f'desire_{utility}_heat_map.png'))

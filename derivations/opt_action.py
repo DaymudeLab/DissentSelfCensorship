@@ -147,7 +147,7 @@ def subplot_boldness(delta_values):
                 xlabel=r'Boldness, $\beta_i$',
                 ylabel=r'Optimal Action Dissent, $a_{i,r}^*$')
     
-    fig.savefig(osp.join('.', 'figs', 'opt_action_beta_constant.png'))
+    fig.savefig(osp.join('.', 'figs/action_vs_param', 'opt_action_beta_constant.png'))
 
     # Combine subplots for linear pi into one figure and save.
     fig, ax = plt.subplots(1, 4, figsize=(15.75, 4), dpi=300, facecolor='white',
@@ -160,7 +160,7 @@ def subplot_boldness(delta_values):
                 xlabel=r'Boldness, $\beta_i$',
                 ylabel=r'Optimal Action Dissent, $a_{i,r}^*$')
 
-    fig.savefig(osp.join('.', 'figs', 'opt_action_beta_linear.png'))
+    fig.savefig(osp.join('.', 'figs/action_vs_param', 'opt_action_beta_linear.png'))
 
 def subplot_severity(delta_values):
     """
@@ -178,7 +178,7 @@ def subplot_severity(delta_values):
                 xlabel=r'Severity, $s_r$',
                 ylabel=r'Optimal Action Dissent, $a_{i,r}^*$')
     
-    fig.savefig(osp.join('.', 'figs', 'opt_action_severity_constant.png'))
+    fig.savefig(osp.join('.', 'figs/action_vs_param', 'opt_action_severity_constant.png'))
 
     # Combine subplots for linear pi into one figure and save.
     fig, ax = plt.subplots(1, 4, figsize=(15.75, 4), dpi=300, facecolor='white',
@@ -191,7 +191,7 @@ def subplot_severity(delta_values):
                 xlabel=r'Severity, $s_r$',
                 ylabel=r'Optimal Action Dissent, $a_{i,r}^*$')
 
-    fig.savefig(osp.join('.', 'figs', 'opt_action_severity_linear.png'))
+    fig.savefig(osp.join('.', 'figs/action_vs_param', 'opt_action_severity_linear.png'))
 
 def subplot_tolerance(delta_values):
     """
@@ -209,7 +209,7 @@ def subplot_tolerance(delta_values):
                 xlabel=r'Tolerance, $t_r$',
                 ylabel=r'Optimal Action Dissent, $a_{i,r}^*$')
     
-    fig.savefig(osp.join('.', 'figs', 'opt_action_tolerance_constant.png'))
+    fig.savefig(osp.join('.', 'figs/action_vs_param', 'opt_action_tolerance_constant.png'))
 
     # Combine subplots for linear pi into one figure and save.
     fig, ax = plt.subplots(1, 4, figsize=(15.75, 4), dpi=300, facecolor='white',
@@ -222,7 +222,7 @@ def subplot_tolerance(delta_values):
                 xlabel=r'Tolerance, $t_r$',
                 ylabel=r'Optimal Action Dissent, $a_{i,r}^*$')
 
-    fig.savefig(osp.join('.', 'figs', 'opt_action_tolerance_linear.png'))
+    fig.savefig(osp.join('.', 'figs/action_vs_param', 'opt_action_tolerance_linear.png'))
 
 def subplot_nu(delta_values):
     """
@@ -240,7 +240,7 @@ def subplot_nu(delta_values):
                 xlabel=r'Surveillance, $v$',
                 ylabel=r'Optimal Action Dissent, $a_{i,r}^*$')
     
-    fig.savefig(osp.join('.', 'figs', 'opt_action_nu_constant.png'))
+    fig.savefig(osp.join('.', 'figs/action_vs_param', 'opt_action_nu_constant.png'))
 
     # Combine subplots for linear pi into one figure and save.
     fig, ax = plt.subplots(1, 4, figsize=(15.75, 4), dpi=300, facecolor='white',
@@ -253,7 +253,7 @@ def subplot_nu(delta_values):
                 xlabel=r'Surveillance, $v$',
                 ylabel=r'Optimal Action Dissent, $a_{i,r}^*$')
 
-    fig.savefig(osp.join('.', 'figs', 'opt_action_nu_linear.png'))
+    fig.savefig(osp.join('.', 'figs/action_vs_param', 'opt_action_nu_linear.png'))
 
 if __name__ == "__main__":
     delta_values = [0.25, 0.5, 0.75, 1.0]

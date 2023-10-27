@@ -1,147 +1,57 @@
-import uuid
+# Project:  CensorshipDissent
+# Filename: main.py
+# Authors:  Anish Nahar (anahar1@asu.edu)
+
+"""
+main: Runs the simulation for a network of individuals and an authority 
+with a set of rules that defines one's actions.
+"""
+
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 import numpy as np
+import os.path as osp
 
-"""
-Authority Class
-"""
-class Authority:
-
-    def __init__(self):
-        self.pi = None
-        self.tau = None
-        self.s = None
-        self.alpha = None
-        self.v = None
-    
-    def utility_authority(a, alpha, pi, tau, s):
-        """
-
-        :param a: a array of float actions a_i in [0, d_i]
-        :param alpha: a float adamancy parameter > 0
-        :param pi: a string punishment function in ["constant", "linear"]
-        :param tau: a tolerance in [0, 1]
-        :param s: a severity parameter > 0
-        """
-        utility = 0
-
-        for a_i in a:
-            p_i = Authority.calc_punishment(a_i, pi, tau, s)
-            utility += alpha * a_i + p_i
-        
-        return -utility
-
-    
-    def calc_punishment(a_i, pi, tau, s):
-        """
-
-        :param a: a array of float actions a_i in [0, d_i]
-        :param pi: a string punishment function in ["constant", "linear"]
-        :param tau: a tolerance in [0, 1]
-        :param s: a severity parameter > 0
-        """
-
-        if a_i > tau:
-            if pi == "constant":
-                return s
-            else:
-                return s * (a_i - tau)
-        
-        else:
-            return 0
-
-    def probability(v, a_i):
-        """
-        Calculates the probability of a punishment being enacted.
-        """
-        return v + (1 - v) * a_i
-    
-    def noise():
-
-        return np.random.normal(0, 1)
-
-    def opt_tolerance():
-        """
-        Calculates authority's optimal tolerance as a function of known parameters.
-        """
-        pass
-
-    def opt_severity():
-        """
-        Calculates authority's optimal severity as a function of known parameters.
-        """
-        pass
-
-    
-    def get_tolerance():
-        """
-        Returns the authority's tolerance.
-        """
-        return Authority.tau + Authority.noise()
-
-
-    def get_severity():
-        """
-        Returns the authority's severity.
-        """
-        return Authority.s + Authority.noise()
-
-
-"""
-Individual Class
-"""
 class Individual:
+    def __init__(self, delta, beta):
+        self.delta = delta
+        self.beta = beta
 
-    def __init__(self):
-        self.id = uuid.uuid4()
-        self.b_i = None
-        self.d_i = None
+def opt_dissent(delta, beta, nu, pi, t, s):
+    """
+    Computes an individual's optimal action dissent as a function of their
+    parameters, the authority's parameters, and their noisy estimates of the
+    authority's tolerance and severity.
 
-    def opt_action(d_i, b_i, pi, tau, s, v):
-        """
-        Calculates individual i's optimal action as a function of known parameters.
-
-        :param d_i: a float desire to dissent in [0, 1]
-        :param b_i: a boldness parameter > 0
-        :param pi: a string punishment function in ["constant", "linear"]
-        :param tau: a tolerance in [0, 1]
-        :param s: a severity parameter > 0
-        """
-
-        if pi == "constant":
-            if d_i <= tau or (b_i > (1 - v) and  d_i > (b_i * tau + v * s)/(b_i - (1 - v) * s)):
-                return d_i
-            else:
-                return tau
+    :param delta: the individual's float desire to dissent (in [0,1])
+    :param beta: the individual's float boldness (> 0)
+    :param nu: the authority's float surveillance (in [0,1])
+    :param pi: 'constant' or 'linear' punishment
+    :param t: the authority's float tolerance (in [0,1])
+    :param s: the authority's float punishment severity (> 0)
+    :returns: the individual's float optimal action dissent (in [0,delta])
+    """
+    if pi == 'constant':
+        # Compliant/defiant individuals act = desire; the rest self-censor.
+        tip_constant = (beta * t + nu * s) / (beta - (1 - nu) * s)
+        if delta <= t or (beta > (1 - nu) * s and delta > tip_constant):
+            return delta
         else:
-            if d_i <= tau or (v == 1 and s <= b_i) or (v < 1 and Individual.a_peak(tau, v, s, b_i) >= d_i):
-                return d_i
-            if d_i > tau and ((v == 1 and s > b_i) or (v < 1 and Individual.a_peak(tau, v, s, b_i) <= tau)):
-                return tau
-            else:
-                return Individual.a_peak(tau, v, s, b_i)
+            return t
+    elif pi == 'linear':
+        # If the authority's surveillance is perfect, we simply compare the
+        # individual's boldness to the authority's severity.
+        tip_linear = (t + (beta - nu * s) / ((1 - nu) * s)) / 2 if nu < 1 else 0
+        if delta <= t or (nu == 1 and beta >= s) or (nu < 1 and delta <= tip_linear):
+            return delta
+        elif (nu == 1 and beta < s) or (nu < 1 and t >= tip_linear):
+            return t
+        else:
+            return tip_linear
+    else:
+        print('ERROR: Unrecognized punishment function \'' + pi + '\'')
 
-    def a_peak(tau, v, s, b_i):
-        """
-        Calculates individual's peak utility as a function of known parameters.
-        """
-
-        return 0.5 (tau - (v * s - b_i) / (s * (1 - v)))
-    
-
-    def utility_individual(b_i, a_i, d_i, p_i):
-        """
-        Calculates individual utility.
-
-        :param d_i: a float desire to dissent in [0, 1]
-        :param a_i: a float action a_i in [0, d_i]
-        :param b_i: a boldness parameter > 0
-        :param p_i: a float punishment in [0, s]
-        """
-
-        return b_i (1 - d_i + a_i) - p_i
-
-
-def experiment(individuals, num_individuals, authority,  num_rounds):
+def experiment(individuals, num_individuals, nu, pi, t, s,  num_rounds):
     actions_history = []
 
     # Step 1: All individuals calculate and enact a_i.
@@ -159,9 +69,7 @@ def experiment(individuals, num_individuals, authority,  num_rounds):
     
     for round in range(num_rounds):
         # Step 1
-        actions = [individuals[i].opt_action(individuals[i].d_i, individuals[i].b_i, authority.pi, authority.tau, authority.s, authority.v) for i in range(num_individuals)]
         
-        actions_history.append(actions)
 
 
         # Step 2
@@ -169,33 +77,20 @@ def experiment(individuals, num_individuals, authority,  num_rounds):
         # Step 3
 
         # Step 4
+        break
 
 
 if __name__ == "__main__":
     # Setup.
 
-    # Total amount of indivduals.
-    num_individuals = 10000 
+    # Set of parameters for individuals
+    desires = np.linspace(0, 1, 1000)
+    beta = 2
 
-    # Create an array of Individual objects with evenly spaced desires
-    individuals = [Individual() for _ in range(num_individuals)]
-
-    # Generate evenly spaced desires for a large number of individuals
-    desires = np.linspace(0, 1, num_individuals) 
-    
-    for i in range(num_individuals):
-        individuals[i].d_i = desires[i]
-        individuals[i].b_i = np.random.uniform(0, 10)
-
-    # Create an Authority object with random values
-    authority = Authority()
-    authority.tau = np.random.rand()
-    authority.s = np.random.uniform(0, 10)
-    authority.alpha = np.random.uniform(0, 10)
-    authority.v = np.random.rand()
-    authority.pi = "constant"
+    # Create Individual objects
+    individuals = [Individual(delta, beta) for delta in desires]
 
     # Run experiment
-    experiment(individuals, num_individuals, authority, 100)
+    experiment(individuals, 1000, nu=0.5, pi='constant', t=0.25, s=0.6, num_rounds=100)
 
     exit(0)
