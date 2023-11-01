@@ -60,11 +60,14 @@ def opt_dissent(delta, beta, nu, pi, t, s):
 
 def irr_dissent(G, first_action, neighbors, neighbors_num, r):
     """
-    Computes an individual's irrational action dissent as a function of their
-    first action, their neighbor's new action, and their neighbors
+    Computes an individual's irrational action dissent caused by the neighbors
+    as a function of their first action, their neighbor's new action, and their neighbors
 
+    :param G:
     :param first_action:
     :param neighbors:
+    :param neighbors_num:
+    :param r:
     """
 
     sum_neighbors_last_action = 0
@@ -85,7 +88,7 @@ def create_action_hist_plot(action_hist):
     n = len(action_hist)
     cm = plt.get_cmap('gist_rainbow')
     #cm = list(mcolors.CSS4_COLORS)
-    
+
     for key, values in action_hist.items():
         plt.plot(rounds, values, label=f'Individual {(key+1)}', marker='.', color=cm(1.*key/n))
 
@@ -98,7 +101,17 @@ def create_action_hist_plot(action_hist):
     plt.savefig(osp.join('.', 'figs/simulation', f'action_vs_round.png'), dpi=300, bbox_inches='tight')
 
 def experiment(individuals, num_individuals, nu, pi, t, s,  num_rounds):
-    
+    """
+    Runs the experiment for a network of individuals and an authority
+    :param individuals: list of Individual objects
+    :param num_individuals: number of individuals
+    :param nu: the authority's float surveillance (in [0,1])
+    :param pi: 'constant' or 'linear' punishment
+    :param t: the authority's float tolerance (in [0,1])
+    :param s: the authority's float punishment severity (> 0)
+    :param num_rounds: number of rounds
+    """
+
     action_hist = {}
     for i in range(num_individuals):
         action_hist[i] = []
