@@ -11,11 +11,16 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import numpy as np
 import os.path as osp
+import networkx as nx
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import Normalize, LinearSegmentedColormap
 
 class Individual:
     def __init__(self, delta, beta):
         self.delta = delta
+        self.first_action = 0
         self.beta = beta
+        self.actions = []
 
 def opt_dissent(delta, beta, nu, pi, t, s):
     """
@@ -51,46 +56,89 @@ def opt_dissent(delta, beta, nu, pi, t, s):
     else:
         print('ERROR: Unrecognized punishment function \'' + pi + '\'')
 
+
+def irr_dissent(G, first_action, neighbors, neighbors_num, r):
+    """
+    Computes an individual's irrational action dissent as a function of their
+    first action, their neighbor's new action, and their neighbors
+
+    :param first_action:
+    :param neighbors:
+    """
+
+    sum_neighbors_last_action = 0
+    for n in neighbors:
+        sum_neighbors_last_action += G.nodes[n]['action'][r-1]
+
+    a_ir = (neighbors_num * first_action + sum_neighbors_last_action) / (2 * neighbors_num)
+
+    return a_ir
+    
+
 def experiment(individuals, num_individuals, nu, pi, t, s,  num_rounds):
-    actions_history = []
-
-    # Step 1: All individuals calculate and enact a_i.
-
-    # Step 2: The authority calculates and enacts punishments.
-
-    # Step 3: Individuals update one of (d_i, beta_i) according to an update rule.
-
-    # Step 4: The authority updates one of (tau, s) for the next round.
-
-    # Measurement:
-    # Utilities (authority and individuals).
-    # All parameters.
-    # Individuals' actions. (Imagine a plot with time vs. everyone's action trajectories).
+    
+    G = nx.powerlaw_cluster_graph(individuals_num, m=2, p=0.3)
+    
+    # Create the power law graph
+    pos = nx.spring_layout(G) 
     
     for round in range(num_rounds):
-        # Step 1
+
+        if round == 0:
+            for i, individual in enumerate(individuals):
+                individual.first_action = opt_dissent(delta=individual.delta, beta=individual.beta, nu=nu, pi=pi, t=t, s=s)
+                individual.actions.append(individual.first_action)
+        else:
+            for i, individual in enumerate(individuals):
+                irr_action = irr_dissent(G=G, first_action=G.nodes[i]['first_action'], neighbors=G.neighbors(i), neighbors_num=G.degree(i), r=round)
+                individual.actions.append(irr_action)
+            
+
+        # Add the Individual objects as nodes with their desires as node attributes
+        for i, individual in enumerate(individuals):
+            G.nodes[i]['desire'] = individual.delta
+            G.nodes[i]['first_action'] = individual.first_action
+            G.nodes[i]['action'] = individual.actions
         
+    
+        # Visualize
+        desires = nx.get_node_attributes(G, 'desire')  
+        
+        plt.figure(figsize=(10, 10))
+        
+        cmap = LinearSegmentedColormap.from_list('custom_heatmap', [(0.0, 'orange'), (0.5, 'red'), (1.0, 'darkred')])
+        nx.draw(G, pos, node_size=1000, with_labels=False, node_color=list(desires.values()), cmap=cmap, edgecolors='black')
 
+        # Add action values as labels inside each node
+        node_labels = {node: f'{G.nodes[node]["action"][round]:.2f}' for node in G.nodes}
+        nx.draw_networkx_labels(G, pos, labels=node_labels, font_size=10, font_color='black')
 
-        # Step 2
+        # scalar mappable for the colorbar
+        norm = Normalize(vmin=0, vmax=1)
+        sm = ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])  
+        
+        # Show the colorbar
+        cbar = plt.colorbar(sm, cax=None, ax=None, orientation='vertical')
+        cbar.set_label('Desire', rotation=90, labelpad=10)
 
-        # Step 3
+        plt.savefig(osp.join('.', 'figs/simulation', f'round_{(round+1)}.png'), dpi=300, bbox_inches='tight')
 
-        # Step 4
-        break
+        plt.close()
 
 
 if __name__ == "__main__":
     # Setup.
-
+    individuals_num = 50
+    
     # Set of parameters for individuals
-    desires = np.linspace(0, 1, 1000)
+    desires = np.linspace(0, 1, individuals_num)
     beta = 2
-
+    
     # Create Individual objects
     individuals = [Individual(delta, beta) for delta in desires]
-
+    
     # Run experiment
-    experiment(individuals, 1000, nu=0.5, pi='constant', t=0.25, s=0.6, num_rounds=100)
-
+    experiment(individuals, individuals_num, nu=0.5, pi='linear', t=0.25, s=0.6, num_rounds=50)
+    
     exit(0)
