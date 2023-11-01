@@ -7,6 +7,7 @@ main: Runs the simulation for a network of individuals and an authority
 with a set of rules that defines one's actions.
 """
 
+import random
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import numpy as np
@@ -75,8 +76,33 @@ def irr_dissent(G, first_action, neighbors, neighbors_num, r):
     return a_ir
     
 
+def create_action_hist_plot(action_hist):
+
+    rounds = list(range(len(action_hist[0])))
+
+    plt.figure(figsize=(10, 6))
+
+    n = len(action_hist)
+    cm = plt.get_cmap('gist_rainbow')
+    #cm = list(mcolors.CSS4_COLORS)
+    
+    for key, values in action_hist.items():
+        plt.plot(rounds, values, label=f'Individual {(key+1)}', marker='.', color=cm(1.*key/n))
+
+    plt.xlabel('Round')
+    plt.ylabel('Action')
+    plt.title('Action vs Round')
+    plt.legend(loc='upper left', bbox_to_anchor=(1, 1))
+    plt.grid(True)
+
+    plt.savefig(osp.join('.', 'figs/simulation', f'action_vs_round.png'), dpi=300, bbox_inches='tight')
+
 def experiment(individuals, num_individuals, nu, pi, t, s,  num_rounds):
     
+    action_hist = {}
+    for i in range(num_individuals):
+        action_hist[i] = []
+
     G = nx.powerlaw_cluster_graph(individuals_num, m=2, p=0.3)
     
     # Create the power law graph
@@ -99,37 +125,35 @@ def experiment(individuals, num_individuals, nu, pi, t, s,  num_rounds):
             G.nodes[i]['desire'] = individual.delta
             G.nodes[i]['first_action'] = individual.first_action
             G.nodes[i]['action'] = individual.actions
-        
+
+            if round == num_rounds - 1:
+                action_hist[i] = individual.actions
     
         # Visualize
         desires = nx.get_node_attributes(G, 'desire')  
         
-        plt.figure(figsize=(10, 10))
+        plt.figure(figsize=(15, 12))
         
         cmap = LinearSegmentedColormap.from_list('custom_heatmap', [(0.0, 'orange'), (0.5, 'red'), (1.0, 'darkred')])
-        nx.draw(G, pos, node_size=1000, with_labels=False, node_color=list(desires.values()), cmap=cmap, edgecolors='black')
-
+        nx.draw(G, pos, node_size=2000, with_labels=False, node_color=list(desires.values()), cmap=cmap, edgecolors='black')
+        
         # Add action values as labels inside each node
-        node_labels = {node: f'{G.nodes[node]["action"][round]:.2f}' for node in G.nodes}
+        node_labels = {node: f'{G.nodes[node]["action"][round]:.4f}' for node in G.nodes}
         nx.draw_networkx_labels(G, pos, labels=node_labels, font_size=10, font_color='black')
 
-        # scalar mappable for the colorbar
-        norm = Normalize(vmin=0, vmax=1)
-        sm = ScalarMappable(cmap=cmap, norm=norm)
-        sm.set_array([])  
-        
-        # Show the colorbar
-        cbar = plt.colorbar(sm, cax=None, ax=None, orientation='vertical')
-        cbar.set_label('Desire', rotation=90, labelpad=10)
+        plt.colorbar(ScalarMappable(cmap=cmap), orientation='vertical', label='Action')
 
-        plt.savefig(osp.join('.', 'figs/simulation', f'round_{(round+1)}.png'), dpi=300, bbox_inches='tight')
+        plt.savefig(osp.join('.', 'figs/simulation/rounds', f'round_{(round+1)}.png'), dpi=300, bbox_inches='tight')
 
         plt.close()
+    
+    #print(action_hist)
+    create_action_hist_plot(action_hist)
 
 
 if __name__ == "__main__":
     # Setup.
-    individuals_num = 50
+    individuals_num = 20
     
     # Set of parameters for individuals
     desires = np.linspace(0, 1, individuals_num)
@@ -139,6 +163,6 @@ if __name__ == "__main__":
     individuals = [Individual(delta, beta) for delta in desires]
     
     # Run experiment
-    experiment(individuals, individuals_num, nu=0.5, pi='linear', t=0.25, s=0.6, num_rounds=50)
+    experiment(individuals, individuals_num, nu=0.5, pi='linear', t=0.25, s=0.6, num_rounds=10)
     
     exit(0)
