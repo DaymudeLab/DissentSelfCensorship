@@ -8,8 +8,8 @@ with a set of rules that defines one's actions.
 """
 
 import random
+from cmcrameri import cm
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
 import numpy as np
 import os.path as osp
 import networkx as nx
@@ -19,6 +19,7 @@ from matplotlib.colors import Normalize, LinearSegmentedColormap
 class Individual:
     def __init__(self, delta, beta):
         self.delta = delta
+        self.first_delta = delta
         self.first_action = 0
         self.beta = beta
         self.actions = []
@@ -58,10 +59,13 @@ def opt_dissent(delta, beta, nu, pi, t, s):
         print('ERROR: Unrecognized punishment function \'' + pi + '\'')
 
 
-def irr_dissent(G, first_action, neighbors, neighbors_num, r):
+def socialization(G, neighbors, neighbors_num, r, d_r):
     """
-    Computes an individual's irrational action dissent caused by the neighbors
-    as a function of their first action, their neighbor's new action, and their neighbors
+    Each individual updates their desired dissent for the next round to a weighted average of
+    their current desired dissent and their neighbors' actions. In addition to the above terminology,
+    let a_i,r be the action taken by individual I_i in round r. As in Rule 1, we can generalize with a
+    weight parameter w > 0 capturing the strength of self-preference
+    d_i,r+1 = (w * d_r + sum_of_neighors_a_ir) / (w + N(I_i))
 
     :param G:
     :param first_action:
@@ -69,38 +73,136 @@ def irr_dissent(G, first_action, neighbors, neighbors_num, r):
     :param neighbors_num:
     :param r:
     """
+    w = neighbors_num
 
     sum_neighbors_last_action = 0
     for n in neighbors:
         sum_neighbors_last_action += G.nodes[n]['action'][r-1]
 
-    a_ir = (neighbors_num * first_action + sum_neighbors_last_action) / (2 * neighbors_num)
+    new_desire = (w * d_r + sum_neighbors_last_action) / (w + neighbors_num)
 
-    return a_ir
+    return new_desire
+
+
+def sharing_around_tables(G, neighbors, neighbors_num, r, d_r):
+    """
+    Each individual updates their desired dissent for the next round to a weighted average of
+    their current desired dissent and those of their neighbors (N).
+    d_i,r+1 = (N * d_r + sum_of_neighors_d_r) / (1 + N)
     
+    :param G:
+    :param first_desire:
+    :param neighbors:
+    :param neighbors_num:
+    :param r:
+    """
+    w = neighbors_num
 
-def create_action_hist_plot(action_hist):
+    sum_neighbors_desire = 0
+    for n in neighbors:
+        sum_neighbors_desire += G.nodes[n]['desire']
+
+    new_desire = (w * d_r + sum_neighbors_desire) / (w + neighbors_num)
+
+    return new_desire
+
+def when_in_rome(G, neighbors, neighbors_num, r, a_ir):
+    """
+    Each individual I_i first computes their optimal action a*_i,r for round r as a function of their
+    (unchanging) desired dissent and boldness. But instead of acting according to a*_i,r, they act
+    according to a weighted average of a*_i,r and their neighbors' actions in the previous round. As in
+    Rules 2-3, we can generalize with a weight parameter w > 0 capturing the strength of self-preference
+    a_i,r+1 = (w * a*_i,r + sum_of_neighors_a_i,r) / (w + N(I_i))
+
+    :param G:
+    :param first_desire:
+    :param neighbors:
+    :param neighbors_num:
+    :param r:
+    """
+    w = neighbors_num
+
+    sum_neighbors_last_action = 0
+    for n in neighbors:
+        sum_neighbors_last_action += G.nodes[n]['action'][r-1]
+
+    new_action = (w * a_ir + sum_neighbors_last_action) / (w + neighbors_num)
+
+    return new_action
+
+def create_action_hist_plot(action_hist, rule):
 
     rounds = list(range(len(action_hist[0])))
 
     plt.figure(figsize=(10, 6))
 
     n = len(action_hist)
-    cm = plt.get_cmap('gist_rainbow')
-    #cm = list(mcolors.CSS4_COLORS)
+    colormap = cm.batlow
 
     for key, values in action_hist.items():
-        plt.plot(rounds, values, label=f'Individual {(key+1)}', marker='.', color=cm(1.*key/n))
+        plt.plot(rounds, values, label=f'Individual {(key+1)}', marker='.', color=colormap(key/n))
 
     plt.xlabel('Round')
+    plt.grid(True)
+    # Set y-axis limits to [0, 1]
+    plt.ylim(0, 1)
+    # Add a dotted line at y=0.25 and label it as "t"
+    plt.axhline(y=0.25, color='gray', linestyle='--', label='t')
     plt.ylabel('Action')
     plt.title('Action vs Round')
-    plt.legend(loc='upper left', bbox_to_anchor=(1, 1))
+
+    if rule == 'sharing around tables':
+        plt.savefig(osp.join('.', 'figs/simulation/sharing_around_tables', f'action_vs_round.png'), dpi=300, bbox_inches='tight')
+    elif rule == 'when in rome':
+        plt.savefig(osp.join('.', 'figs/simulation/when_in_rome', f'action_vs_round.png'), dpi=300, bbox_inches='tight')
+    elif rule == 'socialization':
+        plt.savefig(osp.join('.', 'figs/simulation/socialization', f'action_vs_round.png'), dpi=300, bbox_inches='tight')
+
+
+def create_desire_hist_plot(action_hist, rule):
+
+    rounds = list(range(len(action_hist[0])))
+
+    plt.figure(figsize=(10, 6))
+
+    n = len(action_hist)
+    colormap = cm.batlow
+
+    for key, values in action_hist.items():
+        plt.plot(rounds, values, label=f'Individual {(key+1)}', marker='.', color=colormap(key/n))
+
+    plt.xlabel('Round')
     plt.grid(True)
+    # Set y-axis limits to [0, 1]
+    plt.ylim(0, 1)
+    # Add a dotted line at y=0.25 and label it as "t"
+    plt.axhline(y=0.25, color='gray', linestyle='--', label='t')
+    plt.ylabel('Desire')
+    plt.title('Desire vs Round')
 
-    plt.savefig(osp.join('.', 'figs/simulation', f'action_vs_round.png'), dpi=300, bbox_inches='tight')
+    if rule == 'sharing around tables':
+        plt.savefig(osp.join('.', 'figs/simulation/sharing_around_tables', f'desire_vs_round.png'), dpi=300, bbox_inches='tight')
+    elif rule == 'when in rome':
+        plt.savefig(osp.join('.', 'figs/simulation/when_in_rome', f'desire_vs_round.png'), dpi=300, bbox_inches='tight')
+    elif rule == 'socialization':
+        plt.savefig(osp.join('.', 'figs/simulation/socialization', f'desire_vs_round.png'), dpi=300, bbox_inches='tight')
 
-def experiment(individuals, num_individuals, nu, pi, t, s,  num_rounds):
+
+# Determines the color of the node and the text inside the node
+def color_mapping(action, desire):
+    if action <= 0.25:
+        return 'lightblue', 'black'
+    elif action < desire:
+        normalized_value = (action - 0.25) / (desire - 0.25)
+        color = plt.cm.Reds(normalized_value)
+        
+        # check if the color is dark enough to use white text
+        text_color = 'white' if np.mean(color[:3]) < 0.5 else 'black'
+        return color, text_color
+    else:
+        return 'darkred', 'white'
+
+def experiment(individuals, num_individuals, nu, pi, t, s,  num_rounds, change_rule):
     """
     Runs the experiment for a network of individuals and an authority
     :param individuals: list of Individual objects
@@ -113,69 +215,180 @@ def experiment(individuals, num_individuals, nu, pi, t, s,  num_rounds):
     """
 
     action_hist = {}
+    desire_dict = {}
     for i in range(num_individuals):
         action_hist[i] = []
+        desire_dict[i] = []
 
     G = nx.powerlaw_cluster_graph(individuals_num, m=2, p=0.3)
     
     # Create the power law graph
     pos = nx.spring_layout(G) 
     
-    for round in range(num_rounds):
+    if change_rule == 'socialization':
+        for round in range(num_rounds):
 
-        if round == 0:
             for i, individual in enumerate(individuals):
-                individual.first_action = opt_dissent(delta=individual.delta, beta=individual.beta, nu=nu, pi=pi, t=t, s=s)
-                individual.actions.append(individual.first_action)
-        else:
+                if round != 0:
+                    individual.delta = socialization(G=G, neighbors=G.neighbors(i), neighbors_num=G.degree(i), r=round, d_r=individual.delta)
+                    
+                action = opt_dissent(delta=individual.delta, beta=individual.beta, nu=nu, pi=pi, t=np.random.normal(loc=t, scale=0.05) , s=np.random.normal(loc=s, scale=0.05) )
+                individual.actions.append(action)
+                               
+            # Add the Individual objects as nodes with their desires as node attributes
             for i, individual in enumerate(individuals):
-                irr_action = irr_dissent(G=G, first_action=G.nodes[i]['first_action'], neighbors=G.neighbors(i), neighbors_num=G.degree(i), r=round)
-                individual.actions.append(irr_action)
+                G.nodes[i]['desire'] = individual.delta
+                G.nodes[i]['action'] = individual.actions
+                desire_dict[i].append(individual.delta)
+                #if round == num_rounds - 1:
+                action_hist[i] = individual.actions
+            
+            if round < 5 or round == 10 or round == 15 or round == 20 or round > 27: 
+                plt.figure(figsize=(15, 12))
+
+                node_colors, text_colors = zip(*[color_mapping(G.nodes[i]['action'][round], G.nodes[i]['desire']) for i in G.nodes])
+
+                nx.draw(G, pos, node_size=100, with_labels=False, node_color=node_colors, edgecolors='black')
+
+                # Add action values as labels inside each node
+                #for node, text_color in zip(G.nodes, text_colors):
+                #    nx.draw_networkx_labels(G, pos, labels={node: f'{G.nodes[node]["action"][round]:.4f}'}, font_size=10, font_color=text_color)
+
+                # cbar legend
+                cmap_colors = [(0.0, 'lightblue'), (0.25, (1.0, 0.9607843137254902, 0.9411764705882353)), (1.0, 'darkred')]
+                cmap = LinearSegmentedColormap.from_list('custom_heatmap', cmap_colors)
+                sm = ScalarMappable(cmap=cmap)
+                sm.set_array([])
+                cbar = plt.colorbar(sm, pad=0.02)
+                cbar.set_label('')
+                cbar.set_ticks([0, 0.25, 1])
+                cbar.set_ticklabels(['Compliant', 'Completely Censoring', 'Defiant'])
+
+                plt.title(f'Round {round+1}', fontsize=30)
+
+                plt.savefig(osp.join('.', 'figs/simulation/socialization', f'round_{(round+1)}.png'), dpi=300, bbox_inches='tight')
+
+                plt.close()
+
+    elif change_rule == 'sharing around tables':
+        
+        for round in range(num_rounds):
+            
+            for i, individual in enumerate(individuals):
+                if round != 0:
+                    individual.delta = sharing_around_tables(G=G, neighbors=G.neighbors(i), neighbors_num=G.degree(i), r=round, d_r=individual.delta)
+                    
+                action = opt_dissent(delta=individual.delta, beta=individual.beta, nu=nu, pi=pi, t=np.random.normal(loc=t, scale=0.05) , s=np.random.normal(loc=s, scale=0.05) )
+                individual.actions.append(action)
+                               
+            # Add the Individual objects as nodes with their desires as node attributes
+            for i, individual in enumerate(individuals):
+                G.nodes[i]['desire'] = individual.delta
+                G.nodes[i]['action'] = individual.actions
+                desire_dict[i].append(individual.delta)
+                #if round == num_rounds - 1:
+                action_hist[i] = individual.actions
+            
+            if round < 5 or round == 10 or round == 15 or round == 20 or round > 27: 
+                plt.figure(figsize=(15, 12))
+
+                node_colors, text_colors = zip(*[color_mapping(G.nodes[i]['action'][round], G.nodes[i]['desire']) for i in G.nodes])
+
+                nx.draw(G, pos, node_size=100, with_labels=False, node_color=node_colors, edgecolors='black')
+
+                # Add action values as labels inside each node
+                #for node, text_color in zip(G.nodes, text_colors):
+                #    nx.draw_networkx_labels(G, pos, labels={node: f'{G.nodes[node]["action"][round]:.4f}'}, font_size=10, font_color=text_color)
+
+                # cbar legend
+                cmap_colors = [(0.0, 'lightblue'), (0.25, (1.0, 0.9607843137254902, 0.9411764705882353)), (1.0, 'darkred')]
+                cmap = LinearSegmentedColormap.from_list('custom_heatmap', cmap_colors)
+                sm = ScalarMappable(cmap=cmap)
+                sm.set_array([])
+                cbar = plt.colorbar(sm, pad=0.02)
+                cbar.set_label('')
+                cbar.set_ticks([0, 0.25, 1])
+                cbar.set_ticklabels(['Compliant', 'Completely Censoring', 'Defiant'])
+
+                plt.title(f'Round {round+1}', fontsize=30)
+                plt.savefig(osp.join('.', 'figs/simulation/sharing_around_tables', f'round_{(round+1)}.png'), dpi=300, bbox_inches='tight')
+
+                plt.close()
+
+    elif change_rule == 'when in rome':
+        
+        for round in range(num_rounds):
+            
+            for i, individual in enumerate(individuals):                    
+                action = opt_dissent(delta=individual.delta, beta=individual.beta, nu=nu, pi=pi, t=np.random.normal(loc=t, scale=0.05) , s=np.random.normal(loc=s, scale=0.05) )
+                if round != 0:
+                    action = when_in_rome(G=G, neighbors=G.neighbors(i), neighbors_num=G.degree(i), r=round, a_ir=action)
+                individual.actions.append(action)
             
 
-        # Add the Individual objects as nodes with their desires as node attributes
-        for i, individual in enumerate(individuals):
-            G.nodes[i]['desire'] = individual.delta
-            G.nodes[i]['first_action'] = individual.first_action
-            G.nodes[i]['action'] = individual.actions
-
-            if round == num_rounds - 1:
+            # Add the Individual objects as nodes with their desires as node attributes
+            for i, individual in enumerate(individuals):
+                G.nodes[i]['desire'] = individual.delta
+                G.nodes[i]['action'] = individual.actions
+                desire_dict[i].append(individual.delta)
                 action_hist[i] = individual.actions
+
+            if round < 5 or round == 10 or round == 15 or round == 20 or round > 27: 
+                plt.figure(figsize=(15, 12))
+
+                node_colors, text_colors = zip(*[color_mapping(G.nodes[i]['action'][round], G.nodes[i]['desire']) for i in G.nodes])
+
+                nx.draw(G, pos, node_size=100, with_labels=False, node_color=node_colors, edgecolors='black')
+
+                # Add action values as labels inside each node
+                #for node, text_color in zip(G.nodes, text_colors):
+                #    nx.draw_networkx_labels(G, pos, labels={node: f'{G.nodes[node]["action"][round]:.4f}'}, font_size=10, font_color=text_color)
+
+                # cbar legend
+                cmap_colors = [(0.0, 'lightblue'), (0.25, (1.0, 0.9607843137254902, 0.9411764705882353)), (1.0, 'darkred')]
+                cmap = LinearSegmentedColormap.from_list('custom_heatmap', cmap_colors)
+                sm = ScalarMappable(cmap=cmap)
+                sm.set_array([])
+                cbar = plt.colorbar(sm, pad=0.02)
+                cbar.set_label('')
+                cbar.set_ticks([0, 0.25, 1])
+                cbar.set_ticklabels(['Compliant', 'Completely Censoring', 'Defiant'])
+
+                plt.title(f'Round {round+1}', fontsize=30)
+                
+                plt.savefig(osp.join('.', 'figs/simulation/when_in_rome', f'round_{(round+1)}.png'), dpi=300, bbox_inches='tight')
+
+                plt.close()
+
+    else:
+        print('ERROR: Unrecognized change rule \'' + change_rule + '\'')
     
-        # Visualize
-        desires = nx.get_node_attributes(G, 'desire')  
-        
-        plt.figure(figsize=(15, 12))
-        
-        cmap = LinearSegmentedColormap.from_list('custom_heatmap', [(0.0, 'orange'), (0.5, 'red'), (1.0, 'darkred')])
-        nx.draw(G, pos, node_size=2000, with_labels=False, node_color=list(desires.values()), cmap=cmap, edgecolors='black')
-        
-        # Add action values as labels inside each node
-        node_labels = {node: f'{G.nodes[node]["action"][round]:.4f}' for node in G.nodes}
-        nx.draw_networkx_labels(G, pos, labels=node_labels, font_size=10, font_color='black')
-
-        plt.colorbar(ScalarMappable(cmap=cmap), orientation='vertical', label='Action')
-
-        plt.savefig(osp.join('.', 'figs/simulation/rounds', f'round_{(round+1)}.png'), dpi=300, bbox_inches='tight')
-
-        plt.close()
+    create_action_hist_plot(action_hist, change_rule)
+    create_desire_hist_plot(desire_dict, change_rule)
     
-    #print(action_hist)
-    create_action_hist_plot(action_hist)
 
 
 if __name__ == "__main__":
     # Setup.
-    individuals_num = 20
+    individuals_num = 1000
     
     # Set of parameters for individuals
     desires = np.linspace(0, 1, individuals_num)
-    beta = 2
     
     # Create Individual objects
-    individuals = [Individual(delta, beta) for delta in desires]
+    individuals = [Individual(delta, beta=np.random.uniform(1, 2)) for delta in desires]
     
     # Run experiment
-    experiment(individuals, individuals_num, nu=0.5, pi='linear', t=0.25, s=0.6, num_rounds=10)
+    rule = 'sharing around tables'
+    rule = 'when in rome'
+    rule = 'socialization'
+    experiment(individuals, individuals_num, nu=0.5, pi='linear', t=0.25, s=1.75, num_rounds=30, change_rule = rule)
     
     exit(0)
+
+"""
+1) put noise (normal distribution) on the surveillance and severity parameters
+2) change update rule (act optimal) and desire will be
+d_t+1 = d_t + f(a_avg_t - d_t)
+f = 5% to 20%
+"""

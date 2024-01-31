@@ -9,6 +9,11 @@ __pycache__/
 # C extensions
 *.so
 
+# Figures
+figs/simulation/sharing_around_tables/*
+figs/simulation/when_in_rome/*
+figs/simulation/socialization/*
+
 # Distribution / packaging
 .Python
 build/
