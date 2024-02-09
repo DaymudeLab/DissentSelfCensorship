@@ -14,6 +14,9 @@ figs/simulation/sharing_around_tables/*
 figs/simulation/when_in_rome/*
 figs/simulation/socialization/*
 
+# gif make code file
+simulations/gifmaker.py
+
 # Distribution / packaging
 .Python
 build/
