@@ -86,7 +86,7 @@ def sharing_around_tables(G, neighbors, neighbors_num, r, d_r):
     """
     Each individual updates their desired dissent for the next round to a weighted average of
     their current desired dissent and those of their neighbors (N).
-    d_i,r+1 = (N * d_r + sum_of_neighors_d_r) / (1 + N)
+    d_i,r+1 = (w * d_r + sum_of_neighors_d_r) / (w + N)
     
     :param G:
     :param neighbors:
@@ -382,8 +382,8 @@ if __name__ == "__main__":
     
     # Run experiment
     rule = 'sharing_around_tables'
-    rule = 'when_in_rome'
-    rule = 'socialization'
+    #rule = 'when_in_rome'
+    #rule = 'socialization'
     experiment(individuals, individuals_num, nu=0.5, pi='linear', t=0.25, s=1.75, num_rounds=100, change_rule = rule)
     
     exit(0)
