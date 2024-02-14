@@ -121,7 +121,6 @@ def plot_opt_dissent_vs_utility(ax, beta, nu, pi, t, s, utility_str):
 
     acts = np.empty((1000, 1000))
 
-
     utility = np.linspace(0, y_limit, 1000)
 
     

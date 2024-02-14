@@ -13,6 +13,7 @@ __pycache__/
 figs/simulation/sharing_around_tables/*
 figs/simulation/when_in_rome/*
 figs/simulation/socialization/*
+parallelization
 
 # gif make code file
 simulations/gifmaker.py
