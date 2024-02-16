@@ -118,7 +118,7 @@ if __name__ == "__main__":
 
     # Plot optimal action dissent and utility when v < 1 and defiance exists.
     plot_opt_dissent(ax[0], beta=1, nu=0.2, pi='linear', t=0.25, s=1)
-    ax[0].set(title=r'(a) $\nu < 1$ and $d_{i,r}^{lin} > \hat{t}_{i,r}$',
+    ax[0].set(title=r'(a) $\nu < 1$ and $\hat{t}_{i,r} < d_{i,r}^{lin}$',
               xlabel=r'Desire to Dissent, $\delta_i$',
               ylabel=r'Optimal Action Dissent, $a_{i,r}^*$')
 
