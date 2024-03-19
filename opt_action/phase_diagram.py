@@ -86,8 +86,8 @@ def plot_phase_diagram(ax, yparam, beta, nu, pi, tau, psi):
 
 if __name__ == "__main__":
     # Combine subplots for all parameters and punishment functions.
-    fig, ax = plt.subplots(2, 4, figsize=(10.75, 5.5), dpi=300, sharex='col',
-                           facecolor='white', tight_layout=True)
+    fig, ax = plt.subplots(2, 4, figsize=(13, 5.5), dpi=300, sharex='col',
+                           facecolor='white', layout='constrained')
     params = ['nu', 'tau', 'psi', 'beta']
     labels = [r'(A) Surveillance $\nu$',
               r'(B) Tolerance $\tau_r$',
