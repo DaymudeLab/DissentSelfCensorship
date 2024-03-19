@@ -11,6 +11,7 @@ and noisy estimates of the authority's tolerance and severity.
 import matplotlib.pyplot as plt
 import numpy as np
 
+
 def opt_action(delta, beta, nu, pi, tau, psi):
     """
     Computes an individual's optimal action dissent as a function of their
@@ -43,7 +44,7 @@ def opt_action(delta, beta, nu, pi, tau, psi):
         else:
             return dlin
     else:
-        print('ERROR: Unrecognized punishment function \'' + pi + '\'')
+        assert(False, f'ERROR: Unrecognized punishment function \'{pi}\'')
 
 
 def plot_opt_action(ax, beta, nu, pi, tau, psi, color='tab:blue'):
