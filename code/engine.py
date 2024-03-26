@@ -13,25 +13,25 @@ import numpy as np
 import networkx as nx
 
 
-def d2d(G, deltas, w=1):
+def d2d(G, deltas, w=0.5):
     """
     Calculates one round of individuals adapting their desired dissents based
     on their current desired dissents and those of their neighbors.
 
     :param G: a networkx graph
     :param deltas: an array of individuals' float desired dissents (in [0,1])
-    :param w: a float weight for an individual's own desired dissent relative to
-              any one of their neighbor's desired dissent (> 0)
+    :param w: a float relative weight for an individual's own desired dissent
+              compared to their neighbors' average desired dissent (in [0,1])
     :returns: an updated array of individuals' float desired dissents (in [0,1])
     """
     new_deltas = np.zeros(len(deltas))
     for i in range(len(deltas)):
-        new_deltas[i] = (w * deltas[i] + np.sum(deltas[G[i]])) / (w + len(G[i]))
+        new_deltas[i] = w * deltas[i] + (1 - w) * np.mean(deltas[G[i]])
 
     return new_deltas
 
 
-def d2a(G, deltas, acts, w=1):
+def d2a(G, deltas, acts, w=0.5):
     """
     Calculates one round of individuals adapting their desired dissents based
     on their current desired dissents and their neighbors' current actions.
@@ -39,18 +39,18 @@ def d2a(G, deltas, acts, w=1):
     :param G: a networkx graph
     :param deltas: an array of individuals' float desired dissents (in [0,1])
     :param acts: an array of individuals' float actions (in [0,1])
-    :param w: a float weight for an individual's own desired dissent relative to
-              any one of their neighbor's actions (> 0)
+    :param w: a float relative weight for an individual's own desired dissent
+              compared to their neighbors' average action (in [0,1])
     :returns: an updated array of individuals' float desired dissents (in [0,1])
     """
     new_deltas = np.zeros(len(deltas))
     for i in range(len(deltas)):
-        new_deltas[i] = (w * deltas[i] + np.sum(acts[G[i]])) / (w + len(G[i]))
+        new_deltas[i] = w * deltas[i] + (1 - w) * np.mean(acts[G[i]])
 
     return new_deltas
 
 
-def a2a(G, opt_acts, acts, w=1):
+def a2a(G, opt_acts, acts, w=0.5):
     """
     Calculates one round of individuals' actions based their current optimal
     action and their neighbors' actions from the previous round.
@@ -58,18 +58,21 @@ def a2a(G, opt_acts, acts, w=1):
     :param G: a networkx graph
     :param opt_acts: an array of individuals' float desired dissents (in [0,1])
     :param acts: an array of individuals' float actions (in [0,1])
-    :param w: a float weight for an individual's own optimal action relative to
-              any one of their neighbor's actions (> 0)
+    :param w: a float relative weight for an individual's own optimal action
+              compared to their neighbors' average action (in [0,1])
     :returns: an array of individuals' actions for the current round (in [0,1])
     """
     new_acts = np.zeros(len(acts))
     for i in range(len(acts)):
-        new_acts[i] = (w * opt_acts[i] + np.sum(acts[G[i]])) / (w + len(G[i]))
+        new_acts[i] = w * opt_acts[i] + (1 - w) * np.mean(acts[G[i]])
 
     return new_acts
 
 
-def engine(N, R, rule, w, deg, ptri, deltas, betas, nu, pi, tau, sigma_tau, psi, sigma_psi, seed):
+def engine(N=100, R=100, rule='d2d', w=0.5, deg=3, ptri=0.25,
+           deltas=np.linspace(0, 1, 100), betas=np.repeat(1, 100), nu=0.5,
+           pi='linear', tau=0.25, sigma_tau=0.05, psi=1.75, sigma_psi=0.05,
+           seed=None):
     """
     Runs a simulation of the censorship-dissent model on a social network of
     individuals whose topology has powerlaw-distributed node degrees.

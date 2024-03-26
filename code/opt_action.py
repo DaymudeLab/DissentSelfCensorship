@@ -27,6 +27,8 @@ def opt_action(delta, beta, nu, pi, tau, psi):
     :param psi: the authority's float punishment severity (> 0)
     :returns: the individual's float optimal action dissent (in [0,delta])
     """
+    assert pi in ['constant', 'linear'], f'ERROR: Unrecognized punishment function \"{pi}\"'
+
     if pi == 'constant':
         # Compliant/defiant individuals act = desire; the rest self-censor.
         dcon = (beta * tau + nu * psi) / (beta - (1 - nu) * psi)
@@ -44,8 +46,6 @@ def opt_action(delta, beta, nu, pi, tau, psi):
             return tau
         else:
             return dlin
-    else:
-        assert(False, f'ERROR: Unrecognized punishment function \'{pi}\'')
 
 
 def plot_opt_action(ax, beta, nu, pi, tau, psi, color='tab:blue'):
