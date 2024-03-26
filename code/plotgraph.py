@@ -23,7 +23,7 @@ def color_mapping(action, desire):
     elif action < desire:
         normalized_value = (action - 0.25) / (desire - 0.25)
         color = plt.cm.Reds(normalized_value)
-        
+
         # check if the color is dark enough to use white text
         text_color = 'white' if np.mean(color[:3]) < 0.5 else 'black'
         return color, text_color
@@ -54,7 +54,7 @@ def graph_plot(G, pos, round, rule):
     cmap = LinearSegmentedColormap.from_list('custom_heatmap', cmap_colors)
     sm = ScalarMappable(cmap=cmap)
     sm.set_array([])
-    
+
     # Create a new axis for the color bar
     cax = fig.add_axes([0.95, 0.15, 0.02, 0.7])  # [left, bottom, width, height]
     cbar = plt.colorbar(sm, cax=cax)
@@ -62,7 +62,7 @@ def graph_plot(G, pos, round, rule):
     cbar.set_ticks([0, 0.25, 1])
     cbar.set_ticklabels(['Compliant', 'Completely Censoring', 'Defiant'])
     ax.set_title(f'{rule} - Round {round}', fontsize=30)
-    
+
     plt.savefig(osp.join('.', 'figs/simulation/' + rule, f'round_{(round+1)}.png'), dpi=150, bbox_inches='tight')
 
     plt.close()
