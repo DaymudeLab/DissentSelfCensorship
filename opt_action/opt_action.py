@@ -10,6 +10,7 @@ and noisy estimates of the authority's tolerance and severity.
 
 import matplotlib.pyplot as plt
 import numpy as np
+import os.path as osp
 
 
 def opt_action(delta, beta, nu, pi, tau, psi):
@@ -110,7 +111,7 @@ if __name__ == "__main__":
     ax[1].set(xlabel=r'Desire to Dissent, $\delta_i$',
               ylabel=r'Optimal Action Dissent, $a_{i,r}^*$')
 
-    fig.savefig('opt_action_constant.png')
+    fig.savefig(osp.join('..', 'figs', 'opt_action_constant.png'))
 
     # Combine subplots for linear pi into one figure and save.
     fig, ax = plt.subplots(1, 3, figsize=(10.75, 4), dpi=300, facecolor='white',
@@ -134,4 +135,4 @@ if __name__ == "__main__":
     ax[2].set_title(r'(C) otherwise', weight='bold')
     ax[2].set(xlabel=r'Desire to Dissent, $\delta_i$')
 
-    fig.savefig('opt_action_linear.png')
+    fig.savefig(osp.join('..', 'figs', 'opt_action_linear.png'))

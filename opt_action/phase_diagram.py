@@ -12,6 +12,7 @@ from opt_action import opt_action
 
 import matplotlib.pyplot as plt
 import numpy as np
+import os.path as osp
 
 
 def phase(delta, beta, nu, pi, tau, psi):
@@ -117,4 +118,4 @@ if __name__ == "__main__":
     cbar.set_ticks([0, 0.25, 1])
     cbar.set_ticklabels(['Compliant', 'Self-Censoring', 'Defiant'])
 
-    fig.savefig('phase_diagram.png')
+    fig.savefig(osp.join('..', 'figs', 'phase_diagram.png'))
