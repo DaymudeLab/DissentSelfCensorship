@@ -47,7 +47,7 @@ def anish_thesis_worker(idx, T, N, R, pis, psis, mu_deltas, nus, seeds):
         rng = np.random.default_rng(seeds[t])
         deltas = np.minimum(np.maximum(rng.normal(mu_delta, 0.1, N), 0), 1)
         _, delta_hist, act_hist = engine(
-            N=N, R=R, rule='d2a', w=0.5, deg=3, ptri=0.25, deltas=deltas,
+            N=N, R=R, rule='d2a', w=0.5, deg=5, ptri=0.25, deltas=deltas,
             betas=np.repeat(1, N), nu=nu, pi=pi, tau=0.25, sigma_tau=0.05,
             psi=psi, sigma_psi=0.05, seed=seeds[t])
         deltafs[t], actfs[t] = delta_hist[:,R-1], act_hist[:,R-1]
@@ -55,7 +55,7 @@ def anish_thesis_worker(idx, T, N, R, pis, psis, mu_deltas, nus, seeds):
     return (idx, deltafs, actfs)
 
 
-def anish_thesis(seed=None, num_cores=1):
+def anish_thesis(seed=73462379, num_cores=1):
     """
     An experiment investigating individuals' convergence mean desired dissents
     and actions across a variety of parameter sweeps.
@@ -64,15 +64,15 @@ def anish_thesis(seed=None, num_cores=1):
     :param num_cores: an int number of processors to parallelize over
     """
     # Numbers of trials, individuals, and rounds.
-    T = 10
-    N = 250
+    T = 25
+    N = 500
     R = 100
 
     # Sweep parameters.
     pis = ['constant', 'linear']
     psis = [0.5, 1, 1.5]
-    mu_deltas = np.linspace(0.1, 0.9, 25)
-    nus = np.linspace(0, 1, 25)
+    mu_deltas = np.linspace(0.1, 0.9, 50)
+    nus = np.linspace(0, 1, 50)
 
     # Set up array to hold all of the data.
     deltaf_all = np.zeros((len(pis), len(psis), len(mu_deltas), len(nus), T, N),
@@ -99,11 +99,11 @@ def anish_thesis(seed=None, num_cores=1):
 if __name__ == '__main__':
     # Parse command line arguments.
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('-E', '--exps', type=str, nargs='+', required=True, \
+    parser.add_argument('-E', '--exps', type=str, nargs='+', required=True,
                         help='IDs of experiments to run')
-    parser.add_argument('-R', '--rand_seed', type=int, default=None, \
+    parser.add_argument('-R', '--rand_seed', type=int, default=73462379,
                         help='Seed for random number generation')
-    parser.add_argument('-P', '--num_cores', type=int, default=1, \
+    parser.add_argument('-P', '--num_cores', type=int, default=1,
                         help='Number of cores to parallelize over')
     args = parser.parse_args()
 
