@@ -81,7 +81,7 @@ def engine(N=100, R=100, rule='d2d', w=0.5, deg=3, ptri=0.25,
     :param R: an int number of rounds to simulate
     :param rule: a string adaptation rule in ['d2d', 'd2a', 'a2a']
     :param w: a float weight for an individual's own preference relative to any
-              one of their neighbors in an adaptation rule (> 0)
+              one of their neighbors in an adaptation rule (in [0,1])
     :param deg: see 'm' in nx.powerlaw_cluster_graph (in [1,N])
     :param ptri: see 'p' in nx.powerlaw_cluster_graph (in [0,1])
     :param deltas: an array of individuals' float desired dissents (in [0,1])
