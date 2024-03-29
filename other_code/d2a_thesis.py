@@ -86,7 +86,7 @@ if __name__ == "__main__":
               r'(B) $\psi_r$ = $\beta_i$',
               r'(C) $\psi_r$ > $\beta_i$']
 
-    diagram = 'desire' # ['action', 'desire']
+    diagram = 'action' # ['action', 'desire']
 
     # Plot the phase diagrams for psi and punishment function.
     for i, (psi, label) in enumerate(zip(psi_array, labels)):
