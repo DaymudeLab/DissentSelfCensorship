@@ -16,7 +16,9 @@ figs/simulation/socialization/*
 parallelization
 
 # gif make code file
-simulations/gifmaker.py
+simulations/
+other_code/anish_thesis_acts.npy
+other_code/anish_thesis_deltas.npy
 
 # Distribution / packaging
 .Python
