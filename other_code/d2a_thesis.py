@@ -2,7 +2,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import os.path as osp
-from helper import load_np
+
+def load_np(fname):
+    """
+    Reads a numpy array from file.
+    """
+    with open(fname, 'rb') as f:
+        return np.load(f)
 
 # Define the phase function
 def phase(action, delta, beta=1, nu=None, pi=None, tau=0.25, psi=None):
@@ -55,20 +61,20 @@ def plot_phase_diagram(ax, actions, psi, beta, pi, tau):
             #phases[i, j] = phase(action, delta, beta, nu, pi, tau, psi)
 
     # Plot the phases as colors.
-    colors = [(0, 'orange'), (0.25, 'red'), (1, 'darkred')]
+    colors = [(0, 'yellow'), (0.25, 'orange'), (0.5, 'red'), (0.75, 'darkred'), (1, 'black')]
     cmap = plt.cm.colors.LinearSegmentedColormap.from_list('cphase', colors)
-    im = ax.pcolormesh(deltas, nus, phases, cmap=cmap, shading='auto')
+    im = ax.pcolormesh(deltas, nus, phases, cmap=cmap, vmin=0, vmax=1)
 
     # Set axes information that is common across plots.
     ax.set(xlim=[0.1, 0.9], ylim=[0, 1])
     ax.set_box_aspect(1)
-
+    
     return im
 
 
 if __name__ == "__main__":
     # Load the .npy files
-    #loaded_deltas = load_np('other_code/anish_thesis_deltas.npy')
+    loaded_deltas = load_np('other_code/anish_thesis_deltas.npy')
     loaded_actions = load_np('other_code/anish_thesis_acts.npy')
 
     # Combine subplots for all parameters and punishment functions.
@@ -80,14 +86,24 @@ if __name__ == "__main__":
               r'(B) $\psi_r$ = $\beta_i$',
               r'(C) $\psi_r$ > $\beta_i$']
 
+    diagram = 'desire' # ['action', 'desire']
+
     # Plot the phase diagrams for psi and punishment function.
     for i, (psi, label) in enumerate(zip(psi_array, labels)):
         # Plot sweeps.
-        im = plot_phase_diagram(ax[0, i], actions=loaded_actions, psi=i, beta=1, pi=0,
-                                tau=0.25) # pi = constant
-        im = plot_phase_diagram(ax[1, i], actions=loaded_actions, psi=i, beta=1, pi=1,
-                                tau=0.25) # pi = linear
-        
+        if diagram == 'action':
+            im = plot_phase_diagram(ax[0, i], actions=loaded_actions, psi=i, beta=1, pi=0,
+                                    tau=0.25) # pi = constant
+            im = plot_phase_diagram(ax[1, i], actions=loaded_actions, psi=i, beta=1, pi=1,
+                                    tau=0.25) # pi = linear
+        elif diagram == 'desire':
+            im = plot_phase_diagram(ax[0, i], actions=loaded_deltas, psi=i, beta=1, pi=0,
+                                    tau=0.25) # pi = constant
+            im = plot_phase_diagram(ax[1, i], actions=loaded_deltas, psi=i, beta=1, pi=1,
+                                    tau=0.25) # pi = linear
+        else:
+            exit(1)
+
         # Set axes information.
         ax[0, i].set_title(label, weight='bold')
         ax[1, i].set(xlabel=r'Desire to Dissent, $\delta_i$')
@@ -103,7 +119,14 @@ if __name__ == "__main__":
     # Create and configure a colorbar shared by all axes.
     cbar = fig.colorbar(im, ax=ax.ravel().tolist())
     cbar.set_label('')
-    cbar.set_ticks([0, 0.5, 1])
-    #cbar.set_ticklabels(['Compliant', 'Self-Censoring', 'Defiant'])
 
-    fig.savefig(osp.join('figs', 'd2a_action_phase_diagram.png'))
+    if diagram == 'action':
+        cbar.set_ticks([0, 0.25, 0.5, 0.75, 1])
+        fig.savefig(osp.join('figs', 'd2a_action_phase_diagram.png'))
+    elif diagram == 'desire':
+        cbar.set_ticks([0, 0.25, 0.5, 0.75, 1])
+        fig.savefig(osp.join('figs', 'd2a_desire_phase_diagram.png'))
+    else:
+        cbar.set_ticks([0, 0.25, 1])
+        cbar.set_ticklabels(['Compliant', 'Self-Censoring', 'Defiant'])
+        fig.savefig(osp.join('figs', 'd2a_trans_action_phase_diagram.png'))
