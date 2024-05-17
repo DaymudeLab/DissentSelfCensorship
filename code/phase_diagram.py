@@ -89,10 +89,10 @@ if __name__ == "__main__":
     # Combine subplots for all parameters and punishment functions.
     fig, ax = plt.subplots(2, 4, figsize=(13, 5.5), dpi=300, sharex='col',
                            facecolor='white', layout='constrained')
-    params = ['nu', 'tau', 'psi', 'beta']
-    labels = [r'(A) Surveillance $\nu$',
-              r'(B) Tolerance $\tau_r$',
-              r'(C) Severity $\psi_r$',
+    params = ['tau', 'nu', 'psi', 'beta']
+    labels = [r'(A) Tolerance $\tau$',
+              r'(B) Surveillance $\nu$',
+              r'(C) Severity $\psi$',
               r'(D) Boldness $\beta_i$']
 
     # Plot the phase diagrams for each parameter and punishment function.
@@ -110,7 +110,7 @@ if __name__ == "__main__":
             ax[1, i].set(ylabel=r'Linear Punishment $\pi$')
         if params[i] != 'tau':
             ax[1, i].set_xticks([0, 0.25, 1])
-            ax[1, i].set_xticklabels(['0', r'$\tau_r$', '1'])
+            ax[1, i].set_xticklabels(['0', r'$\tau$', '1'])
 
     # Create and configure a colorbar shared by all axes.
     cbar = fig.colorbar(im, ax=ax.ravel().tolist())
