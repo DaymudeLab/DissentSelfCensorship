@@ -13,6 +13,8 @@ import numpy as np
 import networkx as nx
 
 
+############################### ADAPTATION RULES ###############################
+
 def d2d(G, deltas, w=0.5):
     """
     Calculates one round of individuals adapting their desired dissents based
@@ -69,7 +71,9 @@ def a2a(G, opt_acts, acts, w=0.5):
     return new_acts
 
 
-def engine(N=100, R=100, rule='d2d', w=0.5, deg=3, ptri=0.25,
+############################## SIMULATION ENGINE ###############################
+
+def engine(N=100, R=100, rule='d2d', w=0.5, deg0=3, ptri=0.25,
            deltas=np.linspace(0, 1, 100), betas=np.repeat(1, 100), nu=0.5,
            pi='linear', tau=0.25, sigma_tau=0.05, psi=1.75, sigma_psi=0.05,
            seed=None):
@@ -82,10 +86,10 @@ def engine(N=100, R=100, rule='d2d', w=0.5, deg=3, ptri=0.25,
     :param rule: a string adaptation rule in ['d2d', 'd2a', 'a2a']
     :param w: a float weight for an individual's own preference relative to any
               one of their neighbors in an adaptation rule (in [0,1])
-    :param deg: see 'm' in nx.powerlaw_cluster_graph (in [1,N])
+    :param deg0: see 'm' in nx.powerlaw_cluster_graph (in [1,N])
     :param ptri: see 'p' in nx.powerlaw_cluster_graph (in [0,1])
     :param deltas: an array of individuals' float desired dissents (in [0,1])
-    :param betas: an array individuals' float boldnesses (> 0)
+    :param betas: an array of individuals' float boldnesses (> 0)
     :param nu: the authority's float surveillance (in [0,1])
     :param pi: 'constant' or 'linear' punishment
     :param tau: the authority's float tolerance (in [0,1])
@@ -95,18 +99,22 @@ def engine(N=100, R=100, rule='d2d', w=0.5, deg=3, ptri=0.25,
     :param seed: an int random seed
 
     :returns: the networkx Graph defining the social network topology
-    :returns: an Nx(R+1) array of dissent desires
-    :returns: an NxR array of actions
+    :returns: an Nx(R+1) array of dissent desire histories
+    :returns: an Nx(R+1) array of boldness histories
+    :returns: an NxR array of action histories
     """
     assert rule in ['d2d', 'd2a', 'a2a'], f'ERROR: Unrecognized rule \"{rule}\"'
 
-    # Set up arrays to record desired dissent and action histories.
-    delta_hist, act_hist = np.zeros((N, R+1)), np.zeros((N, R))
+    # Set up arrays to record desired dissent, boldness, and action histories.
+    delta_hist = np.zeros((N, R+1))
     delta_hist[:,0] = deltas
+    beta_hist = np.zeros((N, R+1))
+    beta_hist[:,0] = betas
+    act_hist = np.zeros((N, R))
 
     # Set up random number generator and generate a random graph topology.
     rng = np.random.default_rng(seed)
-    G = nx.powerlaw_cluster_graph(N, deg, ptri, rng)
+    G = nx.powerlaw_cluster_graph(N, deg0, ptri, rng)
 
     # Simulate the specified number of rounds.
     for r in range(R):
@@ -130,6 +138,7 @@ def engine(N=100, R=100, rule='d2d', w=0.5, deg=3, ptri=0.25,
 
         # Record desired dissents and actions in history.
         delta_hist[:,r+1] = np.copy(deltas)
+        beta_hist[:,r+1] = np.copy(betas)
         act_hist[:,r] = acts
 
-    return G, delta_hist, act_hist
+    return G, delta_hist, beta_hist, act_hist
