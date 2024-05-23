@@ -3,12 +3,11 @@
 # Authors:  Joshua J. Daymude (jdaymude@asu.edu).
 
 """
-anish_thesis: Network simulation experiments for Anish Nahar's honors thesis.
+anish_thesis: Network simulation experiment for Anish Nahar's honors thesis.
 """
 
 from engine import engine
 from helper import dump_np, load_np
-from opt_action import opt_action
 
 import argparse
 from itertools import repeat
@@ -62,8 +61,8 @@ def anish_thesis_worker(idx, T, N, R, pis, psis, mu_deltas, beta, nus, tau,
 
 def plot_heatmap(ax, results, mu_deltas, nus):
     """
-    Plot a heatmap of changes in mean desired dissents as a function of initial
-    mean desired dissent and surveillance.
+    Plot a heatmap of mean final desired dissents and actions as a function of
+    initial mean desired dissent and surveillance.
 
     :param ax: a matplotlib.Axes object to plot on
     :param results: a (#mu_deltas)x(#nus)xTxN array of final desired dissents or
