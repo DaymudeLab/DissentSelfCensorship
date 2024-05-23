@@ -1,0 +1,10 @@
+name: CensorshipDissent
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10.*
+  - numpy=1.22.*
+  - matplotlib=3.5.*
+  - tqdm=4.66.*
+  - networkx=3.2.*
