@@ -9,6 +9,17 @@ __pycache__/
 # C extensions
 *.so
 
+# Figures
+figs/simulation/sharing_around_tables/*
+figs/simulation/when_in_rome/*
+figs/simulation/socialization/*
+parallelization
+
+# gif make code file
+simulations/
+other_code/anish_thesis_acts.npy
+other_code/anish_thesis_deltas.npy
+
 # Distribution / packaging
 .Python
 build/
