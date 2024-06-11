@@ -139,7 +139,7 @@ if __name__ == "__main__":
     ax[1].set(xlabel=r'Desired Dissent $\delta_i$',
               ylabel=r'Optimal Action $a_{i,r}^*$')
 
-    fig.savefig(osp.join('..', 'figs', 'opt_action_constant.png'))
+    fig.savefig(osp.join('..', 'figs', 'opt_action_constant.pdf'))
 
     # Combine subplots for linear pi into one figure and save.
     fig, ax = plt.subplots(1, 3, figsize=(10.75, 4), dpi=300, facecolor='white',
@@ -163,4 +163,4 @@ if __name__ == "__main__":
     ax[2].set_title(r'(C) otherwise', weight='bold')
     ax[2].set(xlabel=r'Desired Dissent $\delta_i$')
 
-    fig.savefig(osp.join('..', 'figs', 'opt_action_linear.png'))
+    fig.savefig(osp.join('..', 'figs', 'opt_action_linear.pdf'))
