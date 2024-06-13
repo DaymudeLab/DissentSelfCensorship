@@ -10,7 +10,6 @@ desired dissents or actions based on their neighbors in the network.
 from opt_action import opt_action
 
 import numpy as np
-import networkx as nx
 
 
 ############################### ADAPTATION RULES ###############################
@@ -73,14 +72,14 @@ def a2a(G, opt_acts, acts, w=0.5):
 
 ############################## SIMULATION ENGINE ###############################
 
-def engine(N=100, R=100, rule='d2d', w=0.5, deg0=3, ptri=0.25,
-           deltas=np.linspace(0, 1, 100), betas=np.repeat(1, 100), nu=0.5,
-           pi='linear', tau=0.25, sigma_tau=0.05, psi=1.75, sigma_psi=0.05,
-           seed=None):
+def engine(G, N=100, R=100, rule='d2d', w=0.5, deltas=np.linspace(0, 1, 100),
+           betas=np.repeat(1, 100), nu=0.5, pi='linear', tau=0.25,
+           sigma_tau=0.05, psi=1.75, sigma_psi=0.05, rng=None):
     """
     Runs a simulation of the censorship-dissent model on a social network of
     individuals whose topology has powerlaw-distributed node degrees.
 
+    :param G: a networkx graph
     :param N: an int number of individuals
     :param R: an int number of rounds to simulate
     :param rule: a string adaptation rule in ['d2d', 'd2a', 'a2a']
@@ -96,9 +95,8 @@ def engine(N=100, R=100, rule='d2d', w=0.5, deg0=3, ptri=0.25,
     :param sigma_tau: the float stddev for tolerance observation noise (> 0)
     :param psi: the authority's float punishment severity (> 0)
     :param sigma_psi: the float stddev for severity observation noise (> 0)
-    :param seed: an int random seed
+    :param rng: a numpy.random.Generator, or None if one should be created here
 
-    :returns: the networkx Graph defining the social network topology
     :returns: an Nx(R+1) array of dissent desire histories
     :returns: an Nx(R+1) array of boldness histories
     :returns: an NxR array of action histories
@@ -112,9 +110,9 @@ def engine(N=100, R=100, rule='d2d', w=0.5, deg0=3, ptri=0.25,
     beta_hist[:,0] = betas
     act_hist = np.zeros((N, R))
 
-    # Set up random number generator and generate a random graph topology.
-    rng = np.random.default_rng(seed)
-    G = nx.powerlaw_cluster_graph(N, deg0, ptri, rng)
+    # Set up random number generator if one was not provided.
+    if rng is None:
+        rng = np.random.default_rng()
 
     # Simulate the specified number of rounds.
     for r in range(R):
@@ -141,4 +139,4 @@ def engine(N=100, R=100, rule='d2d', w=0.5, deg0=3, ptri=0.25,
         beta_hist[:,r+1] = np.copy(betas)
         act_hist[:,r] = acts
 
-    return G, delta_hist, beta_hist, act_hist
+    return delta_hist, beta_hist, act_hist

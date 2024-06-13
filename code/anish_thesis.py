@@ -12,6 +12,7 @@ from helper import dump_np, load_np
 import argparse
 from itertools import repeat
 import matplotlib.pyplot as plt
+import networkx as nx
 import numpy as np
 import os.path as osp
 from tqdm.contrib.concurrent import process_map
@@ -49,11 +50,12 @@ def anish_thesis_worker(idx, T, N, R, pis, psis, mu_deltas, beta, nus, tau,
 
     for t in range(T):
         rng = np.random.default_rng(seeds[t])
+        G = nx.powerlaw_cluster_graph(N, 5, 0.25, rng)  # 5 nbrs + Pr[tri] = 1/4
         deltas = np.minimum(np.maximum(rng.normal(mu_delta, 0.1, N), 0), 1)
-        _, delta_hist, _, act_hist = engine(
-            N=N, R=R, rule='d2a', w=0.5, deg0=5, ptri=0.25, deltas=deltas,
+        delta_hist, _, act_hist = engine(
+            G, N=N, R=R, rule='d2a', w=0.5, deltas=deltas,
             betas=np.repeat(beta, N), nu=nu, pi=pi, tau=tau, sigma_tau=0.05,
-            psi=psi, sigma_psi=0.05, seed=seeds[t])
+            psi=psi, sigma_psi=0.05, rng=rng)
         deltafs[t], actfs[t] = delta_hist[:,R-1], act_hist[:,R-1]
 
     return (idx, deltafs, actfs)
