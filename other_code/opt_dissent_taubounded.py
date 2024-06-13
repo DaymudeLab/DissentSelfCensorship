@@ -19,14 +19,14 @@ def opt_dissent(ax, pi, tau_l, tau_u, s, beta, color='tab:blue'):
     desire when the authority's dissent threshold is bounded.
 
     :param ax: a matplotlib.Axes object to plot on
-    :param pi: 'constant' or 'linear' punishment
+    :param pi: 'uniform' or 'variable' punishment
     :param tau_l: a float lower bound on tau (in [0,tau])
     :param tau_u: a float upper bound on tau (in [tau,1])
     :param s: a float authority's punishment severity (> 0)
     :param beta: a float boldness constant (> 0)
     :param color: any color recognized by matplotlib
     """
-    if pi == 'constant':
+    if pi == 'uniform':
         ax.plot([0, tau_l], [0, tau_l], c=color)
         if tau_u >= tau_l + s/beta:
             ax.plot([tau_l, 1], [tau_l, 1], c=color)
@@ -43,7 +43,7 @@ def opt_dissent(ax, pi, tau_l, tau_u, s, beta, color='tab:blue'):
                             r'$\tau_\ell + s/\beta$', '1'], \
                yticklabels=['0', r'$\tau_\ell$', r'$\tau_\ell + s/\beta$', \
                             r'$\tau_u$', '1'])
-    elif pi == 'linear':
+    elif pi == 'variable':
         ax.plot([0, tau_l], [0, tau_l], c=color)
         if s < beta:
             ax.plot([tau_l, 1], [tau_l, 1], c=color)
@@ -71,14 +71,14 @@ def max_utility(ax, pi, tau_l, tau_u, s, beta, color='tab:green'):
     when the authority's dissent threshold is bounded.
 
     :param ax: a matplotlib.Axes object to plot on
-    :param pi: 'constant' or 'linear' punishment
+    :param pi: 'uniform' or 'variable' punishment
     :param tau_l: a float lower bound on tau (in [0,tau])
     :param tau_u: a float upper bound on tau (in [tau,1])
     :param s: a float authority's punishment severity (> 0)
     :param beta: a float boldness constant (> 0)
     :param color: any color recognized by matplotlib
     """
-    if pi == 'constant':
+    if pi == 'uniform':
         ax.plot([0, tau_l], [beta, beta], c=color)
         if tau_u >= tau_l + s/beta:
             ax.plot([tau_l, tau_u, 1], [beta, beta - s, beta - s], c=color)
@@ -90,7 +90,7 @@ def max_utility(ax, pi, tau_l, tau_u, s, beta, color='tab:green'):
                xticklabels=['0', r'$\tau_\ell$', r'$\tau_u$', \
                             r'$\tau_\ell + s/\beta$', '1'], \
                yticklabels=['0', r'$\beta - s$', r'$\beta$'])
-    elif pi == 'linear':
+    elif pi == 'variable':
         ax.plot([0, tau_l], [beta, beta], c=color)
         if s < beta:
             di = np.linspace(tau_l, tau_u, 1000)
@@ -131,32 +131,32 @@ if __name__ == "__main__":
     fig, ax = plt.subplots(2, 4, sharex='col', figsize=(17.5, 7), dpi=300, \
                            facecolor='white', tight_layout=True)
 
-    # Plot optimal action dissent and utility for constant pi and
+    # Plot optimal action dissent and utility for uniform pi and
     # s/beta <= tau_u - tau_l.
-    opt_dissent(ax[0,0], 'constant', tau_l=0.2, tau_u=0.65, s=0.3, beta=1)
-    max_utility(ax[1,0], 'constant', tau_l=0.2, tau_u=0.65, s=0.3, beta=1)
-    ax[0,0].set(title=r'(a) $\pi$ constant with $s/\beta \leq \tau_u - \tau_\ell$',\
+    opt_dissent(ax[0,0], 'uniform', tau_l=0.2, tau_u=0.65, s=0.3, beta=1)
+    max_utility(ax[1,0], 'uniform', tau_l=0.2, tau_u=0.65, s=0.3, beta=1)
+    ax[0,0].set(title=r'(a) $\pi$ uniform with $s/\beta \leq \tau_u - \tau_\ell$',\
                 ylabel=r'Optimal Action Dissent, $\tilde{{a}}_{{i,t}}^*$')
     ax[1,0].set(xlabel=r'Desire to Dissent, $d_i$', \
                 ylabel=r'Maximum Expected Utility, $E[U_{{i,t}}]^*$')
 
-    # Plot optimal action dissent and utility for constant pi and
+    # Plot optimal action dissent and utility for uniform pi and
     # s/beta > tau_u - tau_l.
-    opt_dissent(ax[0,1], 'constant', tau_l=0.2, tau_u=0.65, s=0.6, beta=1)
-    max_utility(ax[1,1], 'constant', tau_l=0.2, tau_u=0.65, s=0.6, beta=1)
-    ax[0,1].set(title=r'(b) $\pi$ constant with $s/\beta > \tau_u - \tau_\ell$')
+    opt_dissent(ax[0,1], 'uniform', tau_l=0.2, tau_u=0.65, s=0.6, beta=1)
+    max_utility(ax[1,1], 'uniform', tau_l=0.2, tau_u=0.65, s=0.6, beta=1)
+    ax[0,1].set(title=r'(b) $\pi$ uniform with $s/\beta > \tau_u - \tau_\ell$')
     ax[1,1].set(xlabel=r'Desire to Dissent, $d_i$')
 
-    # Plot optimal action dissent and utility for linear pi and s < beta.
-    opt_dissent(ax[0,2], 'linear', tau_l=0.2, tau_u=0.65, s=0.6, beta=1)
-    max_utility(ax[1,2], 'linear', tau_l=0.2, tau_u=0.65, s=0.6, beta=1)
-    ax[0,2].set(title=r'(c) $\pi$ linear with $s < \beta$')
+    # Plot optimal action dissent and utility for variable pi and s < beta.
+    opt_dissent(ax[0,2], 'variable', tau_l=0.2, tau_u=0.65, s=0.6, beta=1)
+    max_utility(ax[1,2], 'variable', tau_l=0.2, tau_u=0.65, s=0.6, beta=1)
+    ax[0,2].set(title=r'(c) $\pi$ variable with $s < \beta$')
     ax[1,2].set(xlabel=r'Desire to Dissent, $d_i$')
 
-    # Plot optimal action dissent and utility for linear pi and s >= beta.
-    opt_dissent(ax[0,3], 'linear', tau_l=0.2, tau_u=0.65, s=1.6, beta=1)
-    max_utility(ax[1,3], 'linear', tau_l=0.2, tau_u=0.65, s=1.6, beta=1)
-    ax[0,3].set(title=r'(d) $\pi$ linear with $s \geq \beta$')
+    # Plot optimal action dissent and utility for variable pi and s >= beta.
+    opt_dissent(ax[0,3], 'variable', tau_l=0.2, tau_u=0.65, s=1.6, beta=1)
+    max_utility(ax[1,3], 'variable', tau_l=0.2, tau_u=0.65, s=1.6, beta=1)
+    ax[0,3].set(title=r'(d) $\pi$ variable with $s \geq \beta$')
     ax[1,3].set(xlabel=r'Desire to Dissent, $d_i$')
 
     fig.savefig(osp.join('figs', 'opt_dissent_taubounded.png'))

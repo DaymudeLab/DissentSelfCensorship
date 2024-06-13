@@ -104,7 +104,7 @@ def anish_thesis(seed=73462379, num_cores=1):
     R = 100
 
     # Sweep parameters.
-    pis = ['constant', 'linear']
+    pis = ['uniform', 'variable']
     psis = [0.5, 1, 1.5]
     mu_deltas = np.linspace(0.1, 0.9, 50)
     nus = np.linspace(0, 1, 50)
@@ -159,8 +159,8 @@ def anish_thesis(seed=73462379, num_cores=1):
             ax[1, j].set_xticks([min(mu_deltas), tau, max(mu_deltas)])
             ax[1, j].set_xticklabels([f'{min(mu_deltas)}', r'$\tau$',
                                     f'{max(mu_deltas)}'])
-        ax[0, 0].set(ylabel=r'Constant Punishment $\pi$')
-        ax[1, 0].set(ylabel=r'Linear Punishment $\pi$')
+        ax[0, 0].set(ylabel=r'Uniform Punishment $\pi$')
+        ax[1, 0].set(ylabel=r'Variable Punishment $\pi$')
         fig.supxlabel(r'Mean Initial Desired Dissent $\mu_\delta$')
         fig.supylabel(r'Surveillance $\nu$')
         cbar = fig.colorbar(im, ax=ax.ravel().tolist())

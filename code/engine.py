@@ -73,7 +73,7 @@ def a2a(G, opt_acts, acts, w=0.5):
 ############################## SIMULATION ENGINE ###############################
 
 def engine(G, N=100, R=100, rule='d2d', w=0.5, deltas=np.linspace(0, 1, 100),
-           betas=np.repeat(1, 100), nu=0.5, pi='linear', tau=0.25,
+           betas=np.repeat(1, 100), nu=0.5, pi='variable', tau=0.25,
            sigma_tau=0.05, psi=1.75, sigma_psi=0.05, rng=None):
     """
     Runs a simulation of the censorship-dissent model on a social network of
@@ -90,7 +90,7 @@ def engine(G, N=100, R=100, rule='d2d', w=0.5, deltas=np.linspace(0, 1, 100),
     :param deltas: an array of individuals' float desired dissents (in [0,1])
     :param betas: an array of individuals' float boldnesses (> 0)
     :param nu: the authority's float surveillance (in [0,1])
-    :param pi: 'constant' or 'linear' punishment
+    :param pi: 'uniform' or 'variable' punishment
     :param tau: the authority's float tolerance (in [0,1])
     :param sigma_tau: the float stddev for tolerance observation noise (> 0)
     :param psi: the authority's float punishment severity (> 0)
