@@ -14,6 +14,44 @@ import numpy as np
 
 ############################### ADAPTATION RULES ###############################
 
+def b2sim(G, deltas, acts, shape=1):
+    """
+    Calculates one round of individuals adapting their boldnesses based on how
+    similar their desired dissent is to their neighbor's actions, where more
+    similarity yields higher boldness. The 'shape' parameter, if written as 1/c,
+    causes boldness to equal 1 when the average unsigned desire-to-nbr_action
+    distance is 1/(c+1).
+
+    :param G: a networkx graph
+    :param deltas: an array of individuals' float desired dissents (in [0,1])
+    :param acts: an array of individuals' float actions (in [0,1])
+    :param shape: a float shape parameter for the adaptation function
+    """
+    new_betas = np.zeros(len(deltas))
+    for i in range(len(deltas)):
+        new_betas[i] = np.mean(np.abs(deltas[i] - acts[G[i]]))
+    new_betas = np.minimum(np.maximum(new_betas, 1e-6), 1 - 1e-6)
+    return shape * (1 / new_betas - 1)
+
+
+def b2a(G, acts, shape=1):
+    """
+    Calculates one round of individuals adapting their boldnesses based on how
+    dissenting their most dissenting neighbor's action is, where more dissent
+    yields higher boldness. The 'shape' parameter causes boldness to equal 1
+    when the maximum neighbor action is 1/(shape+1).
+
+    :param G: a networkx graph
+    :param acts: an array of individuals' float actions (in [0,1])
+    :param shape: a float shape parameter for the adaptation function
+    """
+    new_betas = np.zeros(len(acts))
+    for i in range(len(acts)):
+        new_betas[i] = 1 - np.max(acts[G[i]])
+    new_betas = np.minimum(np.maximum(new_betas, 1e-6), 1 - 1e-6)
+    return shape * (1 / new_betas - 1)
+
+
 def d2d(G, deltas, w=0.5):
     """
     Calculates one round of individuals adapting their desired dissents based
@@ -101,7 +139,7 @@ def engine(G, N=100, R=100, rule='d2d', w=0.5, deltas=np.linspace(0, 1, 100),
     :returns: an Nx(R+1) array of boldness histories
     :returns: an NxR array of action histories
     """
-    assert rule in ['d2d', 'd2a', 'a2a'], f'ERROR: Unrecognized rule \"{rule}\"'
+    assert rule in ['b2sim', 'b2a', 'd2d', 'd2a', 'a2a'], f'ERROR: Unrecognized rule \"{rule}\"'
 
     # Set up arrays to record desired dissent, boldness, and action histories.
     delta_hist = np.zeros((N, R+1))
@@ -127,7 +165,11 @@ def engine(G, N=100, R=100, rule='d2d', w=0.5, deltas=np.linspace(0, 1, 100),
                                  noisy_psis[i])
 
         # Apply the specified adaptation rule.
-        if rule == 'd2d':  # "sharing around tables", adapt desire to desires
+        if rule == 'b2sim':  # "solidarity", adapt boldness to similarity
+            betas = b2sim(G, deltas, acts, shape=w)
+        elif rule == 'b2a':  # "solidarity", adapt boldness to actions
+            betas = b2a(G, acts, shape=w)
+        elif rule == 'd2d':  # "sharing around tables", adapt desire to desires
             deltas = d2d(G, deltas, w)
         elif rule == 'd2a':  # "socialization", adapt desire to actions
             deltas = d2a(G, deltas, acts, w)
