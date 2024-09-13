@@ -1,0 +1,23 @@
+[tool.poetry]
+package-mode = false
+name = "censorship-dissent"
+version = "0.1.0"
+description = "Analysis and simulations of self-cenorship and dissent"
+authors = ["Josh Daymude <jdaymude@asu.edu>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+numpy = "^1.26"
+scipy = "^1.13"
+matplotlib = "^3.8"
+cmcrameri = "^1.9"
+tqdm = "^4.66"
+networkx = "^3.3"
+# graphviz = "^0.20"
+# pygraphviz = "^1.13"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
