@@ -76,6 +76,36 @@ def opt_action(delta, beta, nu, pi, tau, psi):
             return d
 
 
+def opt_actions(deltas, betas, nu, pi, tau, psi):
+    """
+    A vectorized version of the above opt_action().
+
+    :param deltas: an array of individuals' float desires to dissent (in [0,1])
+    :param betas: an array of individuals' float boldness constants (> 0)
+    :param nu: the authority's float surveillance (in [0,1])
+    :param pi: 'uniform' or 'variable' punishment
+    :param tau: the authority's float tolerance (in [0,1])
+    :param psi: the authority's float punishment severity (> 0)
+    :returns: the individuals' float optimal actions (in [0,delta_i])
+    """
+    if pi == 'uniform':
+        dunis = (betas * tau + nu * psi) / (betas - (1 - nu) * psi)
+        cond = (deltas <= tau) | ((betas > (1 - nu) * psi) & (deltas >= dunis))
+        return cond * deltas + np.logical_not(cond) * tau
+    elif pi == 'variable':
+        if nu == 1:
+            dvars = np.zeros(len(deltas))
+        else:
+            dvars = (tau + (betas - nu * psi) / ((1 - nu) * psi)) / 2
+        cond1 = (deltas <= tau) | ((nu == 1) & (betas >= psi)) | \
+                ((nu < 1) & (deltas <= dvars))
+        cond2 = (deltas > tau) & (((nu == 1) & (betas < psi)) |
+                                  ((nu < 1) & (tau >= dvars)))
+        return cond1 * deltas + cond2 * tau + np.logical_not(cond1 | cond2) * dvars
+    else:
+        assert False, f'ERROR: Unrecognized punishment function \"{pi}\"'
+
+
 def plot_opt_action(ax, beta, nu, pi, tau, psi, color='tab:blue'):
     """
     Plot an individual's optimal action vs. their desired dissent.
