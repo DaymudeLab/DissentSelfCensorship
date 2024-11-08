@@ -10,12 +10,15 @@ from opt_action import opt_actions
 
 import argparse
 from cmcrameri import cm
+from helper import dump_np
+from itertools import product, repeat
 import matplotlib.pyplot as plt
 import numpy as np
 import os.path as osp
+from tqdm.contrib.concurrent import process_map
 
 
-def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, rng):
+def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed):
     """
     Runs a single simulation trial of the model where individuals' desired
     dissents and boldness constants are exponentially-distributed but fixed and
@@ -23,7 +26,7 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, rng):
 
     :param N: an int number of individuals in the population
     :param R: an int number of rounds to simulate
-    :param delta: a float mean population desired dissent (in [0,1])
+    :param delta: a float mean population desired dissent (> 0)
     :param beta: a float mean population boldness (> 0)
     :param pi: 'uniform' or 'variable' punishment
     :param tau0: the authority's float initial tolerance (in [0,1])
@@ -31,7 +34,7 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, rng):
     :param nu0: the authority's float initial surveillance (in [0,1])
     :param alpha: the authority's float adamancy (> 0)
     :param eps: the float update window radius for RMHC
-    :param rng: a numpy.random.Generator, or None if one should be created here
+    :param seed: an int seed for random number generation
 
     :returns: a 3xR array of the authority's parameter values
     :returns: a 1xR array of the authority's political costs
@@ -39,9 +42,8 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, rng):
     :returns: a 1xN array of individuals' dissent desires
     :returns: a 1xN array of individuals' boldness constants
     """
-    # Set up a random number generator if one was not provided.
-    if rng is None:
-        rng = np.random.default_rng()
+    # Set up random number generation.
+    rng = np.random.default_rng(seed)
 
     # Initialize the population's desired dissents according to an exponential
     # distribution with the given mean, using rejection sampling to ensure
@@ -57,9 +59,9 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, rng):
     betas = rng.exponential(scale=beta, size=N)
 
     # Calculate bounds on the authority's parameters.
-    bounds = np.array([[0, 1],              # tau
-                       [1e-9, max(betas)],  # TODO: psi
-                       [0, 1]])             # nu
+    bounds = np.array([[0, 1],          # tau
+                       [1e-9, np.inf],  # psi
+                       [0, 1]])         # nu
 
     # Set up arrays to store everything that happens.
     params = np.zeros((3, R))
@@ -106,7 +108,54 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, rng):
     return params, pol_costs, pun_costs, deltas, betas
 
 
-def sweep_experiment(N, R, pi, alpha, eps, seed):
+def sweep_worker(idx, db, N, R, pi, tau0s, psi0s, nu0s, alpha, eps, seeds):
+    """
+    Worker function handling the repeated RMHC trials for a single setting of
+    (delta, beta).
+
+    :param idx: a tuple (i, j) representing this parameter setting's index
+    :param db: a tuple (delta, beta) of the float mean population desired
+    dissent (> 0) and the float mean population boldness (> 0)
+    :param N: an int number of individuals in the population
+    :param R: an int number of rounds to simulate
+    :param pi: 'uniform' or 'variable' punishment
+    :param tau0s: a 1xT array of the authority's float initial tolerances
+    :param psi0s: a 1xT array of the authority's float initial severities
+    :param nu0s: a 1xT array of the authority's float initial surveillances
+    :param alpha: the authority's float adamancy (> 0)
+    :param eps: the float update window radius for RMHC
+    :param seeds: a 1xT array of int seeds for random number generation
+
+    :returns: the tuple (i, j) representing this parameter setting's index
+    :returns: a 3xR array of the authority's mean parameters per round
+    :returns: a 3xR array of the authority's parameter standard deviations per
+    round
+    :returns: a 1xR array of the authority's mean political costs per round
+    :returns: a 1xR array of the authority's political cost standard deviations
+    per round
+    :returns: a 1xR array of the authority's mean punishment costs per round
+    :returns: a 1xR array of the authority's punishment cost standard
+    deviations per round
+    """
+    # Set up worker-specific results arrays.
+    w_params = np.zeros((len(seeds), 3, R))
+    w_pol_costs = np.zeros((len(seeds), R))
+    w_pun_costs = np.zeros((len(seeds), R))
+
+    # Run the specified number of trials for this parameter setting.
+    delta, beta = db
+    for t in range(len(seeds)):
+        w_params[t], w_pol_costs[t], w_pun_costs[t], _, _ = \
+            rmhc_trial(N, R, delta, beta, pi, tau0s[t], psi0s[t], nu0s[t],
+                       alpha, eps, seeds[t])
+
+    # Return the index + means/standard deviations across trials.
+    return (idx, w_params.mean(axis=0), w_params.std(axis=0),
+            w_pol_costs.mean(axis=0), w_pol_costs.std(axis=0),
+            w_pun_costs.mean(axis=0), w_pun_costs.std(axis=0))
+
+
+def rmhc_sweep(N, R, pi, alpha, eps, seed, granularity, trials, threads):
     """
     Varying the population's mean desired dissent and boldness as independent
     variables and randomly initializing the authority's parameters, measure the
@@ -120,9 +169,51 @@ def sweep_experiment(N, R, pi, alpha, eps, seed):
     :param pi: 'uniform' or 'variable' punishment
     :param alpha: the authority's float adamancy (> 0)
     :param eps: the float update window radius for RMHC
-    :param seed: a int seed for random number generation
+    :param seed: an int seed for random number generation
+    :param granularity: an int number of delta and beta values to sweep over
+    :param trials: an int number of trials to run per parameter setting
+    :param threads: an int number of threads to parallelize over
     """
-    pass
+    # Set up the independent variables.
+    deltas = np.linspace(0.1, 2.5, granularity)
+    betas = np.linspace(0.1, 10, granularity)
+
+    # Set up random seeds and initial authority parameters for the trials.
+    rng = np.random.default_rng(seed)
+    seeds = rng.integers(0, 2**32, size=trials)
+    tau0s = rng.random(size=trials)
+    psi0s = rng.random(size=trials)
+    nu0s = rng.random(size=trials)
+
+    # Set up results containers: for each (delta, beta) pair, we store the mean
+    # and standard deviation of the three parameters, political costs, and
+    # punishment costs in each round across all trials.
+    params = np.zeros((granularity, granularity, 2, 3, R))
+    pol_costs = np.zeros((granularity, granularity, 2, R))
+    pun_costs = np.zeros((granularity, granularity, 2, R))
+
+    # Run the experiment with the specified number of parallel threads.
+    idxs = list(product(range(granularity), range(granularity)))
+    dbs = list(product(deltas, betas))
+    p = process_map(sweep_worker, idxs, dbs, repeat(N), repeat(R), repeat(pi),
+                    repeat(tau0s), repeat(psi0s), repeat(nu0s), repeat(alpha),
+                    repeat(eps), repeat(seeds), max_workers=threads)
+    for (i, j), w_params_mean, w_params_std, w_pol_costs_mean, \
+            w_pol_costs_std, w_pun_costs_mean, w_pun_costs_std in p:
+        params[i, j, 0] = w_params_mean
+        params[i, j, 1] = w_params_std
+        pol_costs[i, j, 0] = w_pol_costs_mean
+        pol_costs[i, j, 1] = w_pol_costs_std
+        pun_costs[i, j, 0] = w_pun_costs_mean
+        pun_costs[i, j, 1] = w_pol_costs_std
+
+    # Dump all results to file.
+    resultsdir = osp.join('..', 'results', f'sweep_N{N}_R{R}_{pi}_S{seed}')
+    dump_np(osp.join(resultsdir, 'deltas.npy'), deltas)
+    dump_np(osp.join(resultsdir, 'betas.npy'), betas)
+    dump_np(osp.join(resultsdir, 'params.npy'), params)
+    dump_np(osp.join(resultsdir, 'pol_costs.npy'), pol_costs)
+    dump_np(osp.join(resultsdir, 'pun_costs.npy'), pun_costs)
 
 
 def plot_trial(taus, psis, nus, pol_costs, pun_costs, alpha, pi, delta, beta):
@@ -136,7 +227,7 @@ def plot_trial(taus, psis, nus, pol_costs, pun_costs, alpha, pi, delta, beta):
     :param pun_costs: a 1xR array of the authority's punishment costs
     :param alpha: the authority's float adamancy (> 0)
     :param pi: the authority's string punishment function
-    :param delta: the float mean population desired dissent (in [0,1])
+    :param delta: the float mean population desired dissent (> 0)
     :param beta: the float mean population boldness (> 0)
     """
     fig, ax = plt.subplots(2, 1, figsize=(9, 5), sharex=True, dpi=300,
@@ -163,7 +254,7 @@ def plot_trial(taus, psis, nus, pol_costs, pun_costs, alpha, pi, delta, beta):
     ax[1].legend()
     ax[1].set(xlim=[0, R], xlabel='Round', ylabel='Parameter Value')
 
-    fig.savefig(osp.join('..', 'figs', 'rmhc_trial.pdf'))
+    fig.savefig(osp.join('..', 'figs', 'rmhc_trial.png'))
 
 
 def plot_sweep():
@@ -177,13 +268,13 @@ if __name__ == "__main__":
                         help=('If present, run the sweep experiment (ignores '
                               '--delta, --beta, --tau0, --psi0, and --nu0); '
                               'otherwise; runs one independent trial (ignores '
-                              '--trials, --threads)'))
+                              '--granularity, --trials, --threads)'))
     parser.add_argument('-N', '--num_ind', type=int, default=100000,
                         help='Number of individuals in the population')
     parser.add_argument('-R', '--rounds', type=int, default=1000,
                         help='Number of rounds to simulate in a single trial')
     parser.add_argument('-D', '--delta', type=float, default=0.5,
-                        help='Mean population desired dissent in [0,1]')
+                        help='Mean population desired dissent > 0')
     parser.add_argument('-B', '--beta', type=float, default=0.5,
                         help='Mean population boldness > 0')
     parser.add_argument('-P', '--pi', choices=['uniform', 'variable'],
@@ -194,12 +285,14 @@ if __name__ == "__main__":
                         help='Authority\'s initial severity > 0')
     parser.add_argument('-V', '--nu', type=float, default=0.1,
                         help='Authority\'s initial surveillance in [0,1]')
-    parser.add_argument('-A', '--alpha', type=float, default=0.25,
+    parser.add_argument('-A', '--alpha', type=float, default=1.0,
                         help='Authority\'s adamancy > 0')
     parser.add_argument('-E', '--epsilon', type=float, default=0.05,
                         help='Window radius for authority parameter updates')
     parser.add_argument('--seed', type=int, default=None,
                         help='Seed for random number generation')
+    parser.add_argument('--granularity', type=int, default=100,
+                        help='Number of parameter values to sweep over')
     parser.add_argument('--trials', type=int, default=100,
                         help='Number of trials to run per parameter setting')
     parser.add_argument('--threads', type=int, default=1,
@@ -209,12 +302,15 @@ if __name__ == "__main__":
     # Run a single trial or sweep experiment.
     rng = np.random.default_rng(args.seed)
     if args.sweep:
-        pass
+        rmhc_sweep(N=args.num_ind, R=args.rounds, pi=args.pi, alpha=args.alpha,
+                   eps=args.epsilon, seed=args.seed,
+                   granularity=args.granularity, trials=args.trials,
+                   threads=args.threads)
     else:
         (taus, psis, nus), pol_costs, pun_costs, deltas, betas = \
             rmhc_trial(N=args.num_ind, R=args.rounds, delta=args.delta,
                        beta=args.beta, pi=args.pi, tau0=args.tau,
                        psi0=args.psi, nu0=args.nu, alpha=args.alpha,
-                       eps=args.epsilon, rng=rng)
+                       eps=args.epsilon, seed=args.seed)
         plot_trial(taus, psis, nus, pol_costs, pun_costs, args.alpha, args.pi,
                    args.delta, args.beta)
