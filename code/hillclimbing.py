@@ -10,7 +10,7 @@ from opt_action import opt_actions
 
 import argparse
 from cmcrameri import cm
-from helper import dump_np
+from helper import dump_np, load_np
 from itertools import product, repeat
 import matplotlib.pyplot as plt
 import numpy as np
@@ -257,8 +257,91 @@ def plot_trial(taus, psis, nus, pol_costs, pun_costs, alpha, pi, delta, beta):
     fig.savefig(osp.join('..', 'figs', 'rmhc_trial.png'))
 
 
-def plot_sweep():
-    pass
+def plot_sweep_finals(N, R, pi, alpha, eps, seed):
+    """
+    Plot the authority's average final costs and parameters across population
+    parameters as determined in an RMHC sweep experiment.
+
+    :param N: an int number of individuals in the population
+    :param R: an int number of rounds to simulate
+    :param pi: 'uniform' or 'variable' punishment
+    :param alpha: the authority's float adamancy (> 0)
+    :param eps: the float update window radius for RMHC
+    :param seed: an int seed for random number generation
+    """
+    # Load results from file.
+    resultsdir = osp.join('..', 'results', f'sweep_N{N}_R{R}_{pi}_S{seed}')
+    deltas = load_np(osp.join(resultsdir, 'deltas.npy'))
+    betas = load_np(osp.join(resultsdir, 'betas.npy'))
+    params = load_np(osp.join(resultsdir, 'params.npy'))
+    pol_costs = load_np(osp.join(resultsdir, 'pol_costs.npy'))
+    pun_costs = load_np(osp.join(resultsdir, 'pun_costs.npy'))
+
+    # Set up the figure.
+    fig, ax = plt.subplots(2, 3, figsize=(9, 5.25), dpi=300, sharex=True,
+                           sharey=True, facecolor='w', layout='constrained')
+
+    # Plot average final parameter values and final costs.
+    data = [params[:, :, 0, 0, -1], params[:, :, 0, 1, -1],
+            params[:, :, 0, 2, -1], alpha * pol_costs[:, :, 0, -1],
+            pun_costs[:, :, 0, -1]]
+    data.append(data[-2] + data[-1])
+    lims = [(0, 1), (0, None), (0, 1), (0, None), (0, None), (0, None)]
+    cmaps = ['Blues', 'Reds', 'Greens', cm.lapaz_r, cm.bilbao_r, cm.acton_r]
+    lbls = [r'(A) Tolerance $\tau$', r'(B) Severity $\psi$',
+            r'(C) Surveillance $\nu$', r'(D) $\alpha \times$Political Cost',
+            '(E) Punishment Cost', '(F) Total Cost']
+    for i, (axi, datum, (pmin, pmax), cmap, lbl) in \
+            enumerate(zip(ax.flat, data, lims, cmaps, lbls)):
+        im = axi.pcolormesh(betas, deltas, datum, vmin=pmin, vmax=pmax,
+                            cmap=cmap, shading='auto')
+        fig.colorbar(im, ax=axi)
+        axi.set_title(lbl, weight='bold')
+        if i > 2:
+            axi.set_xlabel(r'Mean Boldness $\beta$')
+        if i in [0, 3]:
+            axi.set_ylabel(r'Mean Desired Dissent $\delta$')
+
+    fig.savefig(osp.join('..', 'figs', f'finals_N{N}_R{R}_{pi}_S{seed}.png'))
+
+
+def plot_sweep_costs(N, R, pi, alpha, eps, seed):
+    """
+    Plots a 3D figure of time vs. population mean boldness vs. authority's
+    mean/stddev total cost for a median population mean desired dissent, as
+    determined in an RMHC sweep experiment.
+
+    :param N: an int number of individuals in the population
+    :param R: an int number of rounds to simulate
+    :param pi: 'uniform' or 'variable' punishment
+    :param alpha: the authority's float adamancy (> 0)
+    :param eps: the float update window radius for RMHC
+    :param seed: an int seed for random number generation
+    """
+    # Load results from file.
+    resultsdir = osp.join('..', 'results', f'sweep_N{N}_R{R}_{pi}_S{seed}')
+    deltas = load_np(osp.join(resultsdir, 'deltas.npy'))
+    betas = load_np(osp.join(resultsdir, 'betas.npy'))
+    pol_costs = load_np(osp.join(resultsdir, 'pol_costs.npy'))
+    pun_costs = load_np(osp.join(resultsdir, 'pun_costs.npy'))
+
+    # Set up figure.
+    fig = plt.figure(figsize=(5, 4), dpi=300, facecolor='w', layout='tight')
+    ax = fig.add_subplot(projection='3d')
+
+    # Set up colors.
+    colors = cm.batlow(np.linspace(0, 1, len(betas)))
+
+    # Plot mean total costs over time for a median delta value.
+    d = len(deltas) // 2
+    for b, beta in enumerate(betas):
+        ax.plot(np.arange(R), beta, alpha * pol_costs[d, b, 0, :] +
+                pun_costs[d, b, 0, :], c=colors[b])
+
+    # Set axes information and save.
+    ax.set(xlim=(0, R), ylim=(0, betas.max()), xlabel='Rounds',
+           ylabel=r'Mean Boldness $\beta$', zlabel='Total Cost')
+    fig.savefig(osp.join('..', 'figs', f'costs_N{N}_R{R}_{pi}_S{seed}.png'))
 
 
 if __name__ == "__main__":
@@ -266,7 +349,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--sweep', action='store_true',
                         help=('If present, run the sweep experiment (ignores '
-                              '--delta, --beta, --tau0, --psi0, and --nu0); '
+                              '--delta, --beta, --tau, --psi, and --nu); '
                               'otherwise; runs one independent trial (ignores '
                               '--granularity, --trials, --threads)'))
     parser.add_argument('-N', '--num_ind', type=int, default=100000,
