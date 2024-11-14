@@ -58,7 +58,7 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed):
     # exponential distribution with the given mean.
     betas = rng.exponential(scale=beta, size=N)
 
-    # Calculate bounds on the authority's parameters.
+    # Set bounds on the authority's parameters.
     bounds = np.array([[0, 1],          # tau
                        [1e-9, np.inf],  # psi
                        [0, 1]])         # nu
@@ -66,6 +66,11 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed):
     # Set up arrays to store everything that happens.
     params = np.zeros((3, R))
     pol_costs, pun_costs = np.zeros(R), np.zeros(R)
+
+    # Pre-generate all random choices of which parameter to attempt to update
+    # at each step; the hope is that doing this in batch is faster than doing
+    # one at a time in each for loop iteration.
+    param_choices = rng.integers(3, size=R)
 
     # Simulate the specified number of rounds, allowing the authority to adapt
     # its parameters using random mutation hill climbing (RMHC).
@@ -75,7 +80,7 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed):
         if r == 0:
             params[:, r] = [tau0, psi0, nu0]
         else:
-            p = rng.choice([0, 1, 2])  # Choose parameter to update.
+            p = param_choices[r]  # Choose parameter to update.
             params[:, r] = params[:, r-1]
             params[p, r] = rng.uniform(max(bounds[p, 0], params[p, r] - eps),
                                        min(bounds[p, 1], params[p, r] + eps))
