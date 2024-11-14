@@ -202,7 +202,8 @@ def rmhc_sweep(N, R, pi, alpha, eps, seed, granularity, trials, threads):
     dbs = list(product(deltas, betas))
     p = process_map(sweep_worker, idxs, dbs, repeat(N), repeat(R), repeat(pi),
                     repeat(tau0s), repeat(psi0s), repeat(nu0s), repeat(alpha),
-                    repeat(eps), repeat(seeds), max_workers=threads)
+                    repeat(eps), repeat(seeds), max_workers=threads,
+                    chunksize=1)
     for (i, j), w_params_mean, w_params_std, w_pol_costs_mean, \
             w_pol_costs_std, w_pun_costs_mean, w_pun_costs_std in p:
         params[i, j, 0] = w_params_mean
