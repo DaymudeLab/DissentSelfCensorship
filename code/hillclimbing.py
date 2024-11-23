@@ -31,8 +31,6 @@ def texponential(rng, bound, scale, size):
     :param scale: a float mean of the truncated exponential distribution; must
     be in (0, bound / 2)
     :param size: an int number of samples to generate
-    :returns: a float approximated exponential mean to sample from to achieve
-    the desired truncated exponential mean
     :returns: a 1xsize array of float random samples
     """
     # Use bisection search to obtain the mean of an exponential distribution
@@ -61,53 +59,7 @@ def texponential(rng, bound, scale, size):
         x = rng.exponential(scale=mid, size=size)
         samples = np.append(samples, x[np.where(x <= bound)])
 
-    return mid, samples[:size]
-
-
-def plot_exp_hists(num_means=3, num_samples=int(1e7)):
-    """
-    Visualize the difference between two sampling methods: sampling from (1) a
-    truncated exponential distribution in [0, 1] with a given mean, and (2) an
-    exponential distribution with a given mean + rejection sampling to [0, 1].
-
-    :param num_means: an int number of means to visualize between 0.01 and 0.49
-    :param num_samples: an int number of samples per histogram
-    """
-    # Set up figure and RNG.
-    fig, axes = plt.subplots(2, num_means, figsize=(3*num_means, 6),
-                             sharex=True, sharey=True, dpi=300,
-                             layout='constrained')
-    rng = np.random.default_rng()
-
-    # For each mean, plot histograms of the different sampling methods.
-    for i, mean in enumerate(np.linspace(0.01, 0.49, num_means)):
-        # Perform sampling.
-        dist1 = np.array([])
-        while len(dist1) < num_samples:
-            x = rng.exponential(scale=mean, size=num_samples)
-            dist1 = np.append(dist1, x[np.where(x <= 1)])
-        dist1 = dist1[:num_samples]
-        umean, dist2 = texponential(rng, 1, mean, num_samples)
-
-        # Also compute the PDF of a truncated exponential.
-        x = np.linspace(0.001, 1, num_samples)
-        pdf = (1 / umean) * np.exp(-x / umean) / -np.expm1(-1 / umean)
-
-        axes[0, i].hist(dist1, bins=100, density=True, color=cm.lipari(0.55),
-                        label=r'Exp(1/$\mu$) + Rejection')
-        axes[0, i].plot(x, pdf, label='True PDF', color='k')
-        axes[1, i].hist(dist2, bins=100, density=True, color=cm.lipari(0.8),
-                        label=r'Exp(1/$\mu$, $x_0$ = 1)')
-        axes[1, i].plot(x, pdf, label='True PDF', color='k')
-        axes[0, i].set_title(r'$\mu$' f" = {mean:.2f}")
-        axes[1, i].set(xlabel='Value', xlim=[0, 1], ylim=[0, 10])
-
-    # Set final aesthetics and save.
-    axes[0, 0].set(ylabel='Probability Density')
-    axes[1, 0].set(ylabel='Probability Density')
-    axes[0, -1].legend(loc='upper right')
-    axes[1, -1].legend(loc='upper right')
-    fig.savefig(osp.join('..', 'figs', 'exp_hists.png'))
+    return samples[:size]
 
 
 def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed):
@@ -139,7 +91,7 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed):
 
     # Initialize the population's desired dissents according to an exponential
     # distribution truncated to [0, 1] with the given mean.
-    _, deltas = texponential(rng, bound=1, scale=delta, size=N)
+    deltas = texponential(rng, bound=1, scale=delta, size=N)
 
     # Initialize the population's boldness constants according to an
     # exponential distribution with the given mean.
