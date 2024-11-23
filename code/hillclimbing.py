@@ -12,10 +12,102 @@ import argparse
 from cmcrameri import cm
 from helper import dump_np, load_np
 from itertools import product, repeat
+from math import expm1, isclose
 import matplotlib.pyplot as plt
 import numpy as np
 import os.path as osp
 from tqdm.contrib.concurrent import process_map
+
+
+def texponential(rng, bound, scale, size):
+    """
+    Generates `size` samples from a truncated exponential distribution with
+    mean `scale` and range [0, bound]. The underlying sampling method uses
+    rejection sampling from a non-truncated exponential distribution whose mean
+    is approximated to yield the desired truncated distribution's mean.
+
+    :param rng: a numpy.random.Generator instance for random number generation
+    :param bound: a float upper bound of the truncated exponential distribution
+    :param scale: a float mean of the truncated exponential distribution; must
+    be in (0, bound / 2)
+    :param size: an int number of samples to generate
+    :returns: a float approximated exponential mean to sample from to achieve
+    the desired truncated exponential mean
+    :returns: a 1xsize array of float random samples
+    """
+    # Use bisection search to obtain the mean of an exponential distribution
+    # that, when rejection sampled to [0, bound], effectively samples from the
+    # truncated exponential distribution on [0, bound] with the desired mean.
+    # Specifically, the mean X of the desired truncated exponential and the
+    # mean Y of the corresponding non-truncated exponential are related as:
+    # X = Y - bound / (exp(bound / Y) - 1). This method approximates Y given X.
+    lower, upper = scale, 2*scale
+    while upper - bound / expm1(bound / upper) < scale:
+        lower = upper
+        upper *= 2
+    while True:
+        mid = (upper + lower) / 2
+        approx_mean = mid - bound / expm1(bound / mid)
+        if isclose(scale, approx_mean):
+            break
+        elif approx_mean < scale:
+            lower = mid
+        else:  # approx_mean >= scale
+            upper = mid
+
+    # Generate the desired number of samples using rejection sampling.
+    samples = np.array([])
+    while len(samples) < size:
+        x = rng.exponential(scale=mid, size=size)
+        samples = np.append(samples, x[np.where(x <= bound)])
+
+    return mid, samples[:size]
+
+
+def plot_exp_hists(num_means=3, num_samples=int(1e7)):
+    """
+    Visualize the difference between two sampling methods: sampling from (1) a
+    truncated exponential distribution in [0, 1] with a given mean, and (2) an
+    exponential distribution with a given mean + rejection sampling to [0, 1].
+
+    :param num_means: an int number of means to visualize between 0.01 and 0.49
+    :param num_samples: an int number of samples per histogram
+    """
+    # Set up figure and RNG.
+    fig, axes = plt.subplots(2, num_means, figsize=(3*num_means, 6),
+                             sharex=True, sharey=True, dpi=300,
+                             layout='constrained')
+    rng = np.random.default_rng()
+
+    # For each mean, plot histograms of the different sampling methods.
+    for i, mean in enumerate(np.linspace(0.01, 0.49, num_means)):
+        # Perform sampling.
+        dist1 = np.array([])
+        while len(dist1) < num_samples:
+            x = rng.exponential(scale=mean, size=num_samples)
+            dist1 = np.append(dist1, x[np.where(x <= 1)])
+        dist1 = dist1[:num_samples]
+        umean, dist2 = texponential(rng, 1, mean, num_samples)
+
+        # Also compute the PDF of a truncated exponential.
+        x = np.linspace(0.001, 1, num_samples)
+        pdf = (1 / umean) * np.exp(-x / umean) / -np.expm1(-1 / umean)
+
+        axes[0, i].hist(dist1, bins=100, density=True, color=cm.lipari(0.55),
+                        label=r'Exp(1/$\mu$) + Rejection')
+        axes[0, i].plot(x, pdf, label='True PDF', color='k')
+        axes[1, i].hist(dist2, bins=100, density=True, color=cm.lipari(0.8),
+                        label=r'Exp(1/$\mu$, $x_0$ = 1)')
+        axes[1, i].plot(x, pdf, label='True PDF', color='k')
+        axes[0, i].set_title(r'$\mu$' f" = {mean:.2f}")
+        axes[1, i].set(xlabel='Value', xlim=[0, 1], ylim=[0, 10])
+
+    # Set final aesthetics and save.
+    axes[0, 0].set(ylabel='Probability Density')
+    axes[1, 0].set(ylabel='Probability Density')
+    axes[0, -1].legend(loc='upper right')
+    axes[1, -1].legend(loc='upper right')
+    fig.savefig(osp.join('..', 'figs', 'exp_hists.png'))
 
 
 def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed):
@@ -46,13 +138,8 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed):
     rng = np.random.default_rng(seed)
 
     # Initialize the population's desired dissents according to an exponential
-    # distribution with the given mean, using rejection sampling to ensure
-    # that all desired dissents lie in [0,1].
-    deltas = np.array([])
-    while len(deltas) < N:
-        x = rng.exponential(scale=delta, size=N)
-        deltas = np.append(deltas, x[np.where(x <= 1)])
-    deltas = deltas[:N]
+    # distribution truncated to [0, 1] with the given mean.
+    _, deltas = texponential(rng, bound=1, scale=delta, size=N)
 
     # Initialize the population's boldness constants according to an
     # exponential distribution with the given mean.
@@ -180,7 +267,7 @@ def rmhc_sweep(N, R, pi, alpha, eps, seed, granularity, trials, threads):
     :param threads: an int number of threads to parallelize over
     """
     # Set up the independent variables.
-    deltas = np.linspace(0.1, 2.5, granularity)
+    deltas = np.linspace(0.005, 0.495, granularity)
     betas = np.linspace(0.1, 10, granularity)
 
     # Set up random seeds and initial authority parameters for the trials.
@@ -249,8 +336,8 @@ def plot_trial(taus, psis, nus, pol_costs, pun_costs, alpha, pi, delta, beta):
                c=cm.vikO(0))
     ax[0].legend()
     ax[0].set(title=r"Hill Climbing Authority ($\pi$ " f"= {pi}, " r"$\alpha$ "
-              f"= {alpha}) vs. Population " r"$\delta \sim \mathcal{E}$"
-              f"({delta}), " r"$\beta \sim \mathcal{E}$" f"({beta})",
+              f"= {alpha}) vs. Population " r"$\delta_i \sim$" f"Exp({delta}),"
+              r" $\beta_i \sim$" f"Exp({beta}" r"$^{-1}$)",
               ylabel='Costs')
 
     # Plot parameters over time.
@@ -293,15 +380,15 @@ def plot_sweep(N, R, pi, alpha, eps, seed):
     ax_tb = fig.add_subplot(gs[:, 3:5])
 
     # Plot average final parameter values and final costs.
-    data = [params[:, :, 0, 0, -1], params[:, :, 0, 1, -1],
-            params[:, :, 0, 2, -1], alpha * pol_costs[:, :, 0, -1],
-            pun_costs[:, :, 0, -1]]
-    data.append(data[-2] + data[-1])
-    lims = [(0, 1), (0, None), (0, 1), (0, None), (0, None), (0, None)]
-    cmaps = ['Blues', 'Reds', 'Greens', cm.lapaz_r, cm.bilbao_r, cm.acton_r]
-    lbls = [r'(A) Tolerance $\tau$', r'(B) Severity $\psi$',
-            r'(C) Surveillance $\nu$', r'(D) $\alpha \times$Political Cost',
-            '(E) Punishment Cost', '(F) Total Cost']
+    data = [alpha * pol_costs[:, :, 0, -1], pun_costs[:, :, 0, -1],
+            alpha * pol_costs[:, :, 0, -1] + pun_costs[:, :, 0, -1],
+            params[:, :, 0, 0, -1], params[:, :, 0, 1, -1],
+            params[:, :, 0, 2, -1]]
+    lims = [(0, None), (0, None), (0, None), (0, 1), (0, None), (0, 1)]
+    cmaps = [cm.devon_r, cm.bilbao_r, cm.lipari_r, 'Blues', 'Reds', 'Greens']
+    lbls = [r'(A) $\alpha \times$Political Cost', '(B) Punishment Cost',
+            '(C) Total Cost', r'(D) Tolerance $\tau$', r'(E) Severity $\psi$',
+            r'(F) Surveillance $\nu$']
     for i, (axi, datum, (pmin, pmax), cmap, lbl) in \
             enumerate(zip(axes_bd, data, lims, cmaps, lbls)):
         im = axi.pcolormesh(deltas, betas, datum.T, vmin=pmin, vmax=pmax,
@@ -321,27 +408,12 @@ def plot_sweep(N, R, pi, alpha, eps, seed):
     d = len(deltas) // 2
     im = ax_tb.pcolormesh(np.arange(R), betas, alpha * pol_costs[d, :, 0] +
                           pun_costs[d, :, 0], vmin=0, vmax=None,
-                          cmap=cm.batlow, shading='auto')
+                          cmap=cm.lipari_r, shading='auto')
     fig.colorbar(im, ax=ax_tb)
     ax_tb.set_title(r'(G) Total Cost Over Time ($\delta$' +
                     f' = {deltas[d]:.2f})', weight='bold')
     ax_tb.set(xlim=(0, R), ylim=(0, betas.max()), xlabel='Rounds',
               ylabel=r'Mean Boldness $\beta$')
-
-    # 3D version (not used).
-    # ax_tb = fig.add_subplot(gs[:, 3:5], projection='3d')
-    # d = len(deltas) // 2
-    # # Line trajectory version.
-    # colors = cm.batlow(np.linspace(0, 1, len(betas)))
-    # for b, beta in enumerate(betas):
-    #     ax_tb.plot(np.arange(R), beta, alpha * pol_costs[d, b, 0] +
-    #                pun_costs[d, b, 0], c=colors[b])
-    # # Contour version.
-    # x, y = np.meshgrid(np.arange(R), betas)
-    # z = alpha * pol_costs[d, :, 0] + pun_costs[d, :, 0]
-    # ax_tb.plot_surface(x, y, z, cmap=cm.batlow, linewidth=0)
-    # ax_tb.set(xlim=(0, R), ylim=(0, betas.max()), xlabel='Rounds',
-    #           ylabel=r'Mean Boldness $\beta$', zlabel='Total Cost')
 
     fig.savefig(osp.join('..', 'figs', f'sweep_N{N}_R{R}_{pi}_S{seed}.png'))
 
@@ -356,9 +428,9 @@ if __name__ == "__main__":
                               '--granularity, --trials, --threads)'))
     parser.add_argument('-N', '--num_ind', type=int, default=100000,
                         help='Number of individuals in the population')
-    parser.add_argument('-R', '--rounds', type=int, default=1000,
+    parser.add_argument('-R', '--rounds', type=int, default=10000,
                         help='Number of rounds to simulate in a single trial')
-    parser.add_argument('-D', '--delta', type=float, default=0.5,
+    parser.add_argument('-D', '--delta', type=float, default=0.25,
                         help='Mean population desired dissent > 0')
     parser.add_argument('-B', '--beta', type=float, default=0.5,
                         help='Mean population boldness > 0')
@@ -376,9 +448,9 @@ if __name__ == "__main__":
                         help='Window radius for authority parameter updates')
     parser.add_argument('--seed', type=int, default=None,
                         help='Seed for random number generation')
-    parser.add_argument('--granularity', type=int, default=100,
+    parser.add_argument('--granularity', type=int, default=50,
                         help='Number of parameter values to sweep over')
-    parser.add_argument('--trials', type=int, default=100,
+    parser.add_argument('--trials', type=int, default=50,
                         help='Number of trials to run per parameter setting')
     parser.add_argument('--threads', type=int, default=1,
                         help='Number of threads to parallelize over')
@@ -391,6 +463,8 @@ if __name__ == "__main__":
                    eps=args.epsilon, seed=args.seed,
                    granularity=args.granularity, trials=args.trials,
                    threads=args.threads)
+        plot_sweep(N=args.num_ind, R=args.rounds, pi=args.pi, alpha=args.alpha,
+                   eps=args.epsilon, seed=args.seed)
     else:
         (taus, psis, nus), pol_costs, pun_costs, deltas, betas = \
             rmhc_trial(N=args.num_ind, R=args.rounds, delta=args.delta,
