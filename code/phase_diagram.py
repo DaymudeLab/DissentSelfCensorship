@@ -79,17 +79,31 @@ def plot_phase_diagram(ax, xparam, beta, nu, pi, tau, psi):
     cmap = plt.cm.colors.LinearSegmentedColormap.from_list('cphase', colors)
     im = ax.pcolormesh(xvals, deltas, phases, cmap=cmap, shading='auto')
 
-    # Plot duni or dvar, the critical points, over the heatmap.
+    # Plot phase boundaries over the heatmap.
     dfun = duni if pi == 'uniform' else dlin
     if xparam == 'beta':
-        ds = [dfun(xval, nu, tau, psi) for xval in xvals]
+        ds = np.array([dfun(xval, nu, tau, psi) for xval in xvals])
     elif xparam == 'nu':
-        ds = [dfun(beta, xval, tau, psi) for xval in xvals]
+        ds = np.array([dfun(beta, xval, tau, psi) for xval in xvals])
     elif xparam == 'tau':
-        ds = [dfun(beta, nu, xval, psi) for xval in xvals]
+        ds = np.array([dfun(beta, nu, xval, psi) for xval in xvals])
     elif xparam == 'psi':
-        ds = [dfun(beta, nu, tau, xval) for xval in xvals]
-    ax.plot(xvals, ds, color='white')
+        ds = np.array([dfun(beta, nu, tau, xval) for xval in xvals])
+    if xparam == 'tau':
+        xshow = np.ma.masked_where(ds <= xvals, xvals)
+        dshow = np.ma.masked_where(ds <= xvals, ds)
+        ax.plot(xshow, dshow, c='white')
+        ax.plot(xvals, xvals, c='white')
+        if pi == 'linear':
+            ax.plot([xshow.max(), xshow.max()], [dshow.max(), 1], c='white')
+    else:
+        xshow = np.ma.masked_where(ds <= tau, xvals)
+        dshow = np.ma.masked_where(ds <= tau, ds)
+        ax.plot(xshow, dshow, color='white')
+        ax.plot(xvals, np.repeat(tau, len(xvals)), color='white')
+        if pi == 'linear':
+            xbnd = xshow.min() if xparam == 'beta' else xshow.max()
+            ax.plot([xbnd, xbnd], [tau, 1], c='white')
 
     # Set axes information that is common across plots.
     ax.set(xlim=[0, xlim], ylim=[0, 1])
