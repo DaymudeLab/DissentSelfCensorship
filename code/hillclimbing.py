@@ -72,7 +72,7 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed):
     :param R: an int number of rounds to simulate
     :param delta: a float mean population desired dissent (> 0)
     :param beta: a float mean population boldness (> 0)
-    :param pi: 'uniform' or 'variable' punishment
+    :param pi: 'uniform' or 'linear' punishment
     :param tau0: the authority's float initial tolerance (in [0,1])
     :param psi0: the authority's float initial punishment severity (> 0)
     :param nu0: the authority's float initial surveillance (in [0,1])
@@ -133,7 +133,7 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed):
         cond = (acts > tau) & (rng.random(N) < (nu + (1 - nu) * acts))
         if pi == 'uniform':
             punish = cond * psi
-        elif pi == 'variable':
+        elif pi == 'linear':
             punish = cond * psi * (acts - tau)
         else:
             assert False, f'ERROR: Invalid punishment function \"{pi}\"'
@@ -162,7 +162,7 @@ def sweep_worker(idx, db, N, R, pi, tau0s, psi0s, nu0s, alpha, eps, seeds):
     dissent (> 0) and the float mean population boldness (> 0)
     :param N: an int number of individuals in the population
     :param R: an int number of rounds to simulate
-    :param pi: 'uniform' or 'variable' punishment
+    :param pi: 'uniform' or 'linear' punishment
     :param tau0s: a 1xT array of the authority's float initial tolerances
     :param psi0s: a 1xT array of the authority's float initial severities
     :param nu0s: a 1xT array of the authority's float initial surveillances
@@ -210,7 +210,7 @@ def rmhc_sweep(N, R, pi, alpha, eps, seed, granularity, trials, threads):
 
     :param N: an int number of individuals in the population
     :param R: an int number of rounds to simulate
-    :param pi: 'uniform' or 'variable' punishment
+    :param pi: 'uniform' or 'linear' punishment
     :param alpha: the authority's float adamancy (> 0)
     :param eps: the float update window radius for RMHC
     :param seed: an int seed for random number generation
@@ -311,7 +311,7 @@ def plot_sweep(N, R, pi, alpha, eps, seed):
 
     :param N: an int number of individuals in the population
     :param R: an int number of rounds to simulate
-    :param pi: 'uniform' or 'variable' punishment
+    :param pi: 'uniform' or 'linear' punishment
     :param alpha: the authority's float adamancy (> 0)
     :param eps: the float update window radius for RMHC
     :param seed: an int seed for random number generation
@@ -386,7 +386,7 @@ if __name__ == "__main__":
                         help='Mean population desired dissent > 0')
     parser.add_argument('-B', '--beta', type=float, default=0.5,
                         help='Mean population boldness > 0')
-    parser.add_argument('-P', '--pi', choices=['uniform', 'variable'],
+    parser.add_argument('-P', '--pi', choices=['uniform', 'linear'],
                         default='uniform', help='Punishment function')
     parser.add_argument('-T', '--tau', type=float, default=0.25,
                         help='Authority\'s initial tolerance in [0,1]')
