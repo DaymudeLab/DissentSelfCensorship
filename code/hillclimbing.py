@@ -261,7 +261,8 @@ def rmhc_sweep(N, R, pi, alpha, eps, seed, granularity, trials, threads):
     dump_np(osp.join(resultsdir, 'pun_costs.npy'), pun_costs)
 
 
-def plot_trial(taus, psis, nus, pol_costs, pun_costs, alpha, pi, delta, beta):
+def plot_trial(taus, psis, nus, pol_costs, pun_costs, alpha, pi, delta, beta,
+               title=False):
     """
     Plot the evolution of authority costs & parameters in a single RMHC trial.
 
@@ -274,40 +275,45 @@ def plot_trial(taus, psis, nus, pol_costs, pun_costs, alpha, pi, delta, beta):
     :param pi: the authority's string punishment function
     :param delta: the float mean population desired dissent (> 0)
     :param beta: the float mean population boldness (> 0)
+    :param title: True iff the plot should have a title detailing parameters
     """
-    fig, ax = plt.subplots(2, 1, figsize=(9, 5), sharex=True, dpi=300,
-                           tight_layout=True)
+    fig, ax = plt.subplots(2, 1, figsize=(5, 4), sharex=True, dpi=300,
+                           layout='constrained')
     R = len(taus)
 
     # Plot costs (negative utility) over time.
-    ax[0].plot(np.arange(R), alpha * pol_costs, label=r'$\alpha \times$'
-               'Political Cost', c=cm.vikO(0.7))
-    ax[0].plot(np.arange(R), pun_costs, label='Punishment Cost',
+    ax[0].plot(np.arange(R), alpha * pol_costs, label='Political Cost',
                c=cm.vikO(0.3))
+    ax[0].plot(np.arange(R), pun_costs, label='Punishment Cost',
+               c=cm.vikO(0.7))
     ax[0].plot(np.arange(R), alpha * pol_costs + pun_costs, label='Total Cost',
                c=cm.vikO(0))
-    ax[0].legend()
-    ax[0].set(title=r"Hill Climbing Authority ($\pi$ " f"= {pi}, " r"$\alpha$ "
-              f"= {alpha}) vs. Population " r"$\delta_i \sim$" f"Exp({delta}),"
-              r" $\beta_i \sim$" f"Exp({beta}" r"$^{-1}$)",
-              ylabel='Costs')
+    ax[0].legend(loc='best', fontsize='small')
+    ax[0].set(ylabel='Costs')
+    if title:
+        ax[0].set_title(r"Hill Climbing Authority ($\pi$ " f"={pi}, "
+                        r"$\alpha$ " f"= {alpha}) vs. Population "
+                        r"$\delta_i \sim$" f"Exp({delta}), " r" $\beta_i \sim$"
+                        f"Exp({beta}" r"$^{-1}$")
 
     # Plot parameters over time.
-    ax[1].plot(np.arange(R), taus, label=r'Tolerance $\tau$', c=cm.batlowS(2))
-    ax[1].plot(np.arange(R), psis, label=r'Severity $\psi$', c=cm.batlowS(3))
-    ax[1].plot(np.arange(R), nus, label=r'Surveillance $\nu$', c=cm.batlowS(4))
-    ax[1].legend()
-    ax[1].set(xlim=[0, R], xlabel='Round', ylabel='Parameter Value')
+    ax[1].plot(np.arange(R), taus, label=r'Tolerance $\tau_r$',
+               c=plt.cm.Blues(0.9))
+    ax[1].plot(np.arange(R), psis, label=r'Severity $\psi_r$',
+               c=plt.cm.Reds(0.8))
+    ax[1].plot(np.arange(R), nus, label=r'Surveillance $\nu_r$',
+               c=plt.cm.Greens(0.7))
+    ax[1].legend(loc='best', fontsize='small')
+    ax[1].set(xlim=[0, R], xlabel=r'Round $r$', ylabel='Parameter Value')
 
-    fig.savefig(osp.join('..', 'figs', 'rmhc_trial.png'))
+    fig.savefig(osp.join('..', 'figs', 'rmhc_trial.pdf'))
 
 
 def plot_sweep(N, R, pi, alpha, eps, seed):
     """
     Plots the results of an RMHC sweep experiment showing the authority's
     final average parameter values and costs per (mean desired dissent, mean
-    boldness) pair and the authority's total cost over time for a median
-    desired dissent and all boldnesses.
+    boldness) pair.
 
     :param N: an int number of individuals in the population
     :param R: an int number of rounds to simulate
@@ -325,11 +331,11 @@ def plot_sweep(N, R, pi, alpha, eps, seed):
     pun_costs = load_np(osp.join(resultsdir, 'pun_costs.npy'))
 
     # Set up the figure.
-    fig = plt.figure(figsize=(16, 5.1), dpi=300, facecolor='w',
+    fig = plt.figure(figsize=(6.8, 8), dpi=300, facecolor='w',
                      layout='constrained')
-    gs = fig.add_gridspec(2, 5)
-    axes_bd = [fig.add_subplot(gs[i]) for i in product(range(2), range(3))]
-    ax_tb = fig.add_subplot(gs[:, 3:5])
+    gs = fig.add_gridspec(3, 2)
+    axes_bd = [fig.add_subplot(gs[i[::-1]])
+               for i in product(range(2), range(3))]
 
     # Plot average final parameter values and final costs.
     data = [alpha * pol_costs[:, :, 0, -1], pun_costs[:, :, 0, -1],
@@ -337,35 +343,35 @@ def plot_sweep(N, R, pi, alpha, eps, seed):
             params[:, :, 0, 0, -1], params[:, :, 0, 1, -1],
             params[:, :, 0, 2, -1]]
     lims = [(0, None), (0, None), (0, None), (0, 1), (0, None), (0, 1)]
-    cmaps = [cm.devon_r, cm.bilbao_r, cm.lipari_r, 'Blues', 'Reds', 'Greens']
-    lbls = [r'(A) $\alpha \times$Political Cost', '(B) Punishment Cost',
-            '(C) Total Cost', r'(D) Tolerance $\tau$', r'(E) Severity $\psi$',
-            r'(F) Surveillance $\nu$']
+    cmaps = [cm.devon_r, cm.bilbao_r, cm.batlowW_r, 'Blues', 'Reds', 'Greens']
+    lbls = ['(A) Political Cost', '(B) Punishment Cost', '(C) Total Cost',
+            r'(D) Tolerance $\tau_{final}$', r'(E) Severity $\psi_{final}$',
+            r'(F) Surveillance $\nu_{final}$']
     for i, (axi, datum, (pmin, pmax), cmap, lbl) in \
             enumerate(zip(axes_bd, data, lims, cmaps, lbls)):
         im = axi.pcolormesh(deltas, betas, datum.T, vmin=pmin, vmax=pmax,
                             cmap=cmap, shading='auto')
         fig.colorbar(im, ax=axi)
         axi.set_title(lbl, weight='bold')
-        if i <= 2:
-            axi.tick_params(labelbottom=False)
-        else:
+        if i in [2, 5]:
             axi.set_xlabel(r'Mean Desired Dissent $\delta$')
-        if i in [0, 3]:
+        else:
+            axi.tick_params(labelbottom=False)
+        if i <= 2:
             axi.set_ylabel(r'Mean Boldness $\beta$')
         else:
             axi.tick_params(labelleft=False)
 
     # Plot average total cost vs. (round, mean boldness).
-    d = len(deltas) // 2
-    im = ax_tb.pcolormesh(np.arange(R), betas, alpha * pol_costs[d, :, 0] +
-                          pun_costs[d, :, 0], vmin=0, vmax=None,
-                          cmap=cm.lipari_r, shading='auto')
-    fig.colorbar(im, ax=ax_tb)
-    ax_tb.set_title(r'(G) Total Cost Over Time ($\delta$' +
-                    f' = {deltas[d]:.2f})', weight='bold')
-    ax_tb.set(xlim=(0, R), ylim=(0, betas.max()), xlabel='Rounds',
-              ylabel=r'Mean Boldness $\beta$')
+    # d = len(deltas) // 2
+    # im = ax_tb.pcolormesh(np.arange(R), betas, alpha * pol_costs[d, :, 0] +
+    #                       pun_costs[d, :, 0], vmin=0, vmax=None,
+    #                       cmap=cm.lipari_r, shading='auto')
+    # fig.colorbar(im, ax=ax_tb)
+    # ax_tb.set_title(r'(G) Total Cost Over Time ($\delta$' +
+    #                 f' = {deltas[d]:.2f})', weight='bold')
+    # ax_tb.set(xlim=(0, R), ylim=(0, betas.max()), xlabel='Rounds',
+    #           ylabel=r'Mean Boldness $\beta$')
 
     fig.savefig(osp.join('..', 'figs', f'sweep_N{N}_R{R}_{pi}_S{seed}.png'))
 
