@@ -142,7 +142,8 @@ if __name__ == "__main__":
     # Create and configure a colorbar shared by all axes.
     cbar = fig.colorbar(im, ax=ax, pad=0.02)
     cbar.set_label('')
-    cbar.set_ticks([0, 0.5, 1])
-    cbar.set_ticklabels(['Compliant', 'Fully Self-\nCensoring', 'Defiant'])
+    cbar.set_ticks([0, 0.5, 1],
+                   labels=['Compliant', 'Self-\nCensoring', 'Defiant'])
+    cbar.ax.yaxis.get_ticklines()[3].set_visible(False)
 
     fig.savefig(osp.join('..', 'figs', 'phase_diagram.png'))
