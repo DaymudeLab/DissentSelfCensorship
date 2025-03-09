@@ -28,16 +28,16 @@ def duni(beta, nu, tau, psi):
     return (beta * tau + nu * psi) / (beta - (1 - nu) * psi)
 
 
-def dlin(beta, nu, tau, psi):
+def dpro(beta, nu, tau, psi):
     """
     Computes the critical point between self-censorship and defiance as well as
-    the level of self-censorship enacted under linear punishment.
+    the level of self-censorship enacted under proportional punishment.
 
     :param beta: the individual's float boldness (> 0)
     :param nu: the authority's float surveillance (in [0,1])
     :param tau: the authority's float tolerance (in [0,1])
     :param psi: the authority's float punishment severity (> 0)
-    :returns: the float critical point for linear punishment
+    :returns: the float critical point for proportional punishment
     """
     return (tau + (beta - nu * psi) / ((1 - nu) * psi)) / 2 if nu < 1 else 0
 
@@ -51,7 +51,7 @@ def opt_action(delta, beta, nu, pi, tau, psi):
     :param delta: the individual's float desire to dissent (in [0,1])
     :param beta: the individual's float boldness (> 0)
     :param nu: the authority's float surveillance (in [0,1])
-    :param pi: 'uniform' or 'linear' punishment
+    :param pi: 'uniform' or 'proportional' punishment
     :param tau: the authority's float tolerance (in [0,1])
     :param psi: the authority's float punishment severity (> 0)
     :returns: the individual's float optimal action (in [0,delta])
@@ -63,10 +63,10 @@ def opt_action(delta, beta, nu, pi, tau, psi):
             return delta
         else:
             return tau
-    elif pi == 'linear':
+    elif pi == 'proportional':
         # If the authority's surveillance is perfect, we simply compare the
         # individual's boldness to the authority's severity.
-        d = dlin(beta, nu, tau, psi)
+        d = dpro(beta, nu, tau, psi)
         if delta <= tau or (nu == 1 and beta >= psi) or (nu < 1 and delta <= d):
             return delta
         elif (nu == 1 and beta < psi) or (nu < 1 and tau >= d):
@@ -84,7 +84,7 @@ def opt_actions(deltas, betas, nu, pi, tau, psi):
     :param deltas: an array of individuals' float desires to dissent (in [0,1])
     :param betas: an array of individuals' float boldness constants (> 0)
     :param nu: the authority's float surveillance (in [0,1])
-    :param pi: 'uniform' or 'linear' punishment
+    :param pi: 'uniform' or 'proportional' punishment
     :param tau: the authority's float tolerance (in [0,1])
     :param psi: the authority's float punishment severity (> 0)
     :returns: the individuals' float optimal actions (in [0,delta_i])
@@ -93,16 +93,16 @@ def opt_actions(deltas, betas, nu, pi, tau, psi):
         dunis = (betas * tau + nu * psi) / (betas - (1 - nu) * psi)
         cond = (deltas <= tau) | ((betas > (1 - nu) * psi) & (deltas >= dunis))
         return cond * deltas + np.logical_not(cond) * tau
-    elif pi == 'linear':
+    elif pi == 'proportional':
         if nu == 1:
-            dlins = np.zeros(len(deltas))
+            dpros = np.zeros(len(deltas))
         else:
-            dlins = (tau + (betas - nu * psi) / ((1 - nu) * psi)) / 2
+            dpros = (tau + (betas - nu * psi) / ((1 - nu) * psi)) / 2
         cond1 = (deltas <= tau) | ((nu == 1) & (betas >= psi)) | \
-                ((nu < 1) & (deltas <= dlins))
+                ((nu < 1) & (deltas <= dpros))
         cond2 = (deltas > tau) & (((nu == 1) & (betas < psi)) |
-                                  ((nu < 1) & (tau >= dlins)))
-        return cond1 * deltas + cond2 * tau + np.logical_not(cond1 | cond2) * dlins
+                                  ((nu < 1) & (tau >= dpros)))
+        return cond1 * deltas + cond2 * tau + np.logical_not(cond1 | cond2) * dpros
     else:
         assert False, f'ERROR: Unrecognized punishment function \"{pi}\"'
 
@@ -115,7 +115,7 @@ def plot_opt_action(ax, beta, nu, pi, tau, psi):
     :param ax: a matplotlib.Axes object to plot on
     :param beta: the individual's float boldness (> 0)
     :param nu: the authority's float surveillance (in [0,1])
-    :param pi: 'uniform' or 'linear' punishment
+    :param pi: 'uniform' or 'proportional' punishment
     :param tau: the authority's float tolerance (in [0,1])
     :param psi: the authority's float punishment severity (> 0)
     """
@@ -124,7 +124,7 @@ def plot_opt_action(ax, beta, nu, pi, tau, psi):
     acts = opt_actions(deltas, betas, nu, pi, tau, psi)
 
     # Plot compliant, self-censoring, and defiant behaviors.
-    colors=[cm.batlow(0.2), cm.batlow(0.5), cm.batlow(0.8)]
+    colors = [cm.batlow(0.2), cm.batlow(0.5), cm.batlow(0.8)]
     ax.plot(np.ma.masked_where(acts >= tau, deltas),
             np.ma.masked_where(acts >= tau, acts), c=colors[0])
     ax.plot(np.ma.masked_where(acts >= deltas, deltas),
@@ -147,12 +147,12 @@ def plot_opt_action(ax, beta, nu, pi, tau, psi):
             ax.set(xticks=[0, tau, d, 1], yticks=[0, tau, d, 1],
                    xticklabels=['0', r'$\tau_r$', r'$d_{i,r}^{uni}$', '1'],
                    yticklabels=['0', r'$\tau_r$', r'$d_{i,r}^{uni}$', '1'])
-    elif pi == 'linear':
-        d = dlin(beta, nu, tau, psi)
+    elif pi == 'proportional':
+        d = dpro(beta, nu, tau, psi)
         if nu < 1 and d > tau:
             ax.set(xticks=[0, tau, d, 1], yticks=[0, tau, d, 1],
-                   xticklabels=['0', r'$\tau_r$', r'$d_{i,r}^{lin}$', '1'],
-                   yticklabels=['0', r'$\tau_r$', r'$d_{i,r}^{lin}$', '1'])
+                   xticklabels=['0', r'$\tau_r$', r'$d_{i,r}^{pro}$', '1'],
+                   yticklabels=['0', r'$\tau_r$', r'$d_{i,r}^{pro}$', '1'])
         else:
             ax.set(xticks=[0, tau, 1], yticks=[0, tau, 1],
                    xticklabels=['0', r'$\tau_r$', '1'],
@@ -180,26 +180,26 @@ if __name__ == "__main__":
 
     fig.savefig(osp.join('..', 'figs', 'opt_action_uniform.pdf'))
 
-    # Combine subplots for linear punishment into one figure and save.
+    # Combine subplots for proportional punishment into one figure and save.
     fig, ax = plt.subplots(1, 3, figsize=(10.75, 4), dpi=300,
                            facecolor='white', tight_layout=True)
 
     # Plot optimal action and utility when v < 1 and defiance exists.
-    plot_opt_action(ax[0], beta=1, nu=0.2, pi='linear', tau=0.25, psi=1)
-    ax[0].set_title(r'(A) $\nu_r < 1$ and $\tau_r < d_{i,r}^{lin}$',
+    plot_opt_action(ax[0], beta=1, nu=0.2, pi='proportional', tau=0.25, psi=1)
+    ax[0].set_title(r'(A) $\nu_r < 1$ and $\tau_r < d_{i,r}^{pro}$',
                     weight='bold')
     ax[0].set(xlabel=r'Desired Dissent $\delta_i$',
               ylabel=r'Optimal Action $a_{i,r}^*$')
 
     # Plot optimal action and utility when v = 1 and beta >= s.
-    plot_opt_action(ax[1], beta=1, nu=1, pi='linear', tau=0.25, psi=0.6)
+    plot_opt_action(ax[1], beta=1, nu=1, pi='proportional', tau=0.25, psi=0.6)
     ax[1].set_title(r'(B) $\nu_r = 1$ and $\beta_i \geq \psi_r$',
                     weight='bold')
     ax[1].set(xlabel=r'Desired Dissent $\delta_i$')
 
     # Plot optimal action and utility in the remaining case.
-    plot_opt_action(ax[2], beta=1, nu=1, pi='linear', tau=0.25, psi=2)
+    plot_opt_action(ax[2], beta=1, nu=1, pi='proportional', tau=0.25, psi=2)
     ax[2].set_title(r'(C) otherwise', weight='bold')
     ax[2].set(xlabel=r'Desired Dissent $\delta_i$')
 
-    fig.savefig(osp.join('..', 'figs', 'opt_action_linear.pdf'))
+    fig.savefig(osp.join('..', 'figs', 'opt_action_proportional.pdf'))

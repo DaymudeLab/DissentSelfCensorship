@@ -8,7 +8,7 @@ compliance, self-censorship, and defiance as a function of an individual's
 desire to dissent vs. the model's other parameters.
 """
 
-from opt_action import duni, dlin, opt_action
+from opt_action import duni, dpro, opt_action
 
 from cmcrameri import cm
 import matplotlib.pyplot as plt
@@ -24,7 +24,7 @@ def phase(delta, beta, nu, pi, tau, psi):
     :param delta: the individual's float desire to dissent (in [0,1])
     :param beta: the individual's float boldness (> 0)
     :param nu: the authority's float surveillance (in [0,1])
-    :param pi: 'uniform' or 'linear' punishment
+    :param pi: 'uniform' or 'proportional' punishment
     :param tau: the authority's float tolerance (in [0,1])
     :param psi: the authority's float punishment severity (> 0)
     """
@@ -46,7 +46,7 @@ def plot_phase_diagram(ax, xparam, beta, nu, pi, tau, psi):
     :param xparam: the x-axis parameter, from ['beta', 'nu', 'tau', 'psi']
     :param beta: the individual's float boldness (> 0)
     :param nu: the authority's float surveillance (in [0,1])
-    :param pi: 'uniform' or 'linear' punishment
+    :param pi: 'uniform' or 'proportional' punishment
     :param tau: the authority's float tolerance (in [0,1])
     :param psi: the authority's float punishment severity (> 0)
     """
@@ -54,7 +54,7 @@ def plot_phase_diagram(ax, xparam, beta, nu, pi, tau, psi):
     xlim = 2.5 if xparam in ['beta', 'psi'] else 1
 
     # Create an array representing the 2D parameter space.
-    size = 1001  # Avoids divide-by-zero visual artifacts for duni/dlin.
+    size = 1001  # Avoids divide-by-zero visual artifacts for duni/dpro.
     phases = np.zeros((size, size))
     xvals = np.linspace(0, xlim, size)
     deltas = np.linspace(0, 1, size)
@@ -80,7 +80,7 @@ def plot_phase_diagram(ax, xparam, beta, nu, pi, tau, psi):
     im = ax.pcolormesh(xvals, deltas, phases, cmap=cmap, shading='auto')
 
     # Plot phase boundaries over the heatmap.
-    dfun = duni if pi == 'uniform' else dlin
+    dfun = duni if pi == 'uniform' else dpro
     if xparam == 'beta':
         ds = np.array([dfun(xval, nu, tau, psi) for xval in xvals])
     elif xparam == 'nu':
@@ -127,13 +127,13 @@ if __name__ == "__main__":
         # Plot sweeps.
         im = plot_phase_diagram(ax[0, i], param, beta=1, nu=0.5, pi='uniform',
                                 tau=0.25, psi=0.6)
-        im = plot_phase_diagram(ax[1, i], param, beta=1, nu=0.5, pi='linear',
-                                tau=0.25, psi=1.5)
+        im = plot_phase_diagram(ax[1, i], param, beta=1, nu=0.5,
+                                pi='proportional', tau=0.25, psi=1.5)
         # Set axes information.
         ax[1, i].set_xlabel(label, weight='bold', fontsize='large')
         if i == 0:
             ax[0, i].set(ylabel=r'Uniform Punishment $\pi$')
-            ax[1, i].set(ylabel=r'Linear Punishment $\pi$')
+            ax[1, i].set(ylabel=r'Proportional Punishment $\pi$')
         if param != 'tau':
             ax[0, i].set(yticks=[0, 0.25, 1], yticklabels=['0', r'$\tau_r$', '1'])
             ax[1, i].set(yticks=[0, 0.25, 1], yticklabels=['0', r'$\tau_r$', '1'])

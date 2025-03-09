@@ -12,7 +12,7 @@ from opt_action import opt_action
 import numpy as np
 
 
-############################### ADAPTATION RULES ###############################
+############################### ADAPTATION RULES ##############################
 
 def b2sim(G, deltas, acts, shape=1):
     """
@@ -108,10 +108,10 @@ def a2a(G, opt_acts, acts, w=0.5):
     return new_acts
 
 
-############################## SIMULATION ENGINE ###############################
+############################## SIMULATION ENGINE ##############################
 
 def engine(G, N=100, R=100, rule='d2d', w=0.5, deltas=np.linspace(0, 1, 100),
-           betas=np.repeat(1, 100), nu=0.5, pi='linear', tau=0.25,
+           betas=np.repeat(1, 100), nu=0.5, pi='proportional', tau=0.25,
            sigma_tau=0.05, psi=1.75, sigma_psi=0.05, rng=None):
     """
     Runs a simulation of the censorship-dissent model on a social network of
@@ -128,7 +128,7 @@ def engine(G, N=100, R=100, rule='d2d', w=0.5, deltas=np.linspace(0, 1, 100),
     :param deltas: an array of individuals' float desired dissents (in [0,1])
     :param betas: an array of individuals' float boldnesses (> 0)
     :param nu: the authority's float surveillance (in [0,1])
-    :param pi: 'uniform' or 'linear' punishment
+    :param pi: 'uniform' or 'proportional' punishment
     :param tau: the authority's float tolerance (in [0,1])
     :param sigma_tau: the float stddev for tolerance observation noise (> 0)
     :param psi: the authority's float punishment severity (> 0)
@@ -143,9 +143,9 @@ def engine(G, N=100, R=100, rule='d2d', w=0.5, deltas=np.linspace(0, 1, 100),
 
     # Set up arrays to record desired dissent, boldness, and action histories.
     delta_hist = np.zeros((N, R+1))
-    delta_hist[:,0] = deltas
+    delta_hist[:, 0] = deltas
     beta_hist = np.zeros((N, R+1))
-    beta_hist[:,0] = betas
+    beta_hist[:, 0] = betas
     act_hist = np.zeros((N, R))
 
     # Set up random number generator if one was not provided.
@@ -174,11 +174,11 @@ def engine(G, N=100, R=100, rule='d2d', w=0.5, deltas=np.linspace(0, 1, 100),
         elif rule == 'd2a':  # "socialization", adapt desire to actions
             deltas = d2a(G, deltas, acts, w)
         elif r > 0:  # "when in Rome", adapt optimal action to previous actions
-            acts = a2a(G, acts, act_hist[:,r-1], w)
+            acts = a2a(G, acts, act_hist[:, r-1], w)
 
         # Record desired dissents and actions in history.
-        delta_hist[:,r+1] = np.copy(deltas)
-        beta_hist[:,r+1] = np.copy(betas)
-        act_hist[:,r] = acts
+        delta_hist[:, r+1] = np.copy(deltas)
+        beta_hist[:, r+1] = np.copy(betas)
+        act_hist[:, r] = acts
 
     return delta_hist, beta_hist, act_hist
