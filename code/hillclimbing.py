@@ -16,6 +16,7 @@ from math import expm1, isclose
 import matplotlib.pyplot as plt
 import numpy as np
 import os.path as osp
+from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 
 
@@ -322,13 +323,14 @@ def plot_sweep(N, R, pi, alpha, eps, seed):
     :param eps: the float update window radius for RMHC
     :param seed: an int seed for random number generation
     """
-    # Load results from file.
+    # Load results means from file.
     resultsdir = osp.join('..', 'results', f'sweep_N{N}_R{R}_{pi}_S{seed}')
     deltas = load_np(osp.join(resultsdir, 'deltas.npy'))
     betas = load_np(osp.join(resultsdir, 'betas.npy'))
-    params = load_np(osp.join(resultsdir, 'params.npy'))
-    pol_costs = load_np(osp.join(resultsdir, 'pol_costs.npy'))
-    pun_costs = load_np(osp.join(resultsdir, 'pun_costs.npy'))
+    params = load_np(osp.join(resultsdir, 'params.npy'))[:, :, 0]
+    pol_costs = alpha * load_np(osp.join(resultsdir, 'pol_costs.npy'))[:, :, 0]
+    pun_costs = load_np(osp.join(resultsdir, 'pun_costs.npy'))[:, :, 0]
+    total_costs = pol_costs + pun_costs
 
     # Set up the figure.
     fig = plt.figure(figsize=(6.8, 8), dpi=300, facecolor='w',
@@ -338,10 +340,8 @@ def plot_sweep(N, R, pi, alpha, eps, seed):
                for i in product(range(2), range(3))]
 
     # Plot average final parameter values and final costs.
-    data = [alpha * pol_costs[:, :, 0, -1], pun_costs[:, :, 0, -1],
-            alpha * pol_costs[:, :, 0, -1] + pun_costs[:, :, 0, -1],
-            params[:, :, 0, 0, -1], params[:, :, 0, 1, -1],
-            params[:, :, 0, 2, -1]]
+    data = [pol_costs[:, :, -1], pun_costs[:, :, -1], total_costs[:, :, -1],
+            params[:, :, 0, -1], params[:, :, 1, -1], params[:, :, 2, -1]]
     lims = [(0, None), (0, None), (0, None), (0, 1), (0, None), (0, 1)]
     cmaps = [cm.devon_r, cm.bilbao_r, cm.batlowW_r, 'Blues', 'Reds', 'Greens']
     lbls = ['(A) Political Cost', '(B) Punishment Cost', '(C) Total Cost',
@@ -362,18 +362,83 @@ def plot_sweep(N, R, pi, alpha, eps, seed):
         else:
             axi.tick_params(labelleft=False)
 
-    # Plot average total cost vs. (round, mean boldness).
-    # d = len(deltas) // 2
-    # im = ax_tb.pcolormesh(np.arange(R), betas, alpha * pol_costs[d, :, 0] +
-    #                       pun_costs[d, :, 0], vmin=0, vmax=None,
-    #                       cmap=cm.lipari_r, shading='auto')
-    # fig.colorbar(im, ax=ax_tb)
-    # ax_tb.set_title(r'(G) Total Cost Over Time ($\delta$' +
-    #                 f' = {deltas[d]:.2f})', weight='bold')
-    # ax_tb.set(xlim=(0, R), ylim=(0, betas.max()), xlabel='Rounds',
-    #           ylabel=r'Mean Boldness $\beta$')
-
     fig.savefig(osp.join('..', 'figs', f'sweep_N{N}_R{R}_{pi}_S{seed}.png'))
+
+
+def repression_time(pol_costs, window, threshold):
+    """
+    Taking an authority's political costs over time, compute the earliest time
+    at which a sliding window falls to a threshold fraction of max. dissent.
+
+    :param pol_costs: a 1xR array of the authority's political costs
+    :param window: an int sliding window size for measuring repression
+    :param threshold: a fraction of political cost below which is repression
+    :returns: the int earliest time at which dissent is repressed
+    """
+    # Do some basic error checking.
+    assert window < len(pol_costs), 'ERROR: window is longer than the costs'
+
+    # Get maximum political cost for the run.
+    max_pol_cost = pol_costs.max()
+
+    # Check the conditions in a sliding window.
+    step = window
+    while step <= len(pol_costs):
+        if pol_costs[step-window:step].mean() < threshold * max_pol_cost:
+            break
+        else:
+            step += 1
+
+    return step
+
+
+def plot_repression_times(N, R, pi, alpha, seed, window=500, threshold=0.25,
+                          xmax=None):
+    """
+    Plots the authority's repression times as a function of boldness.
+
+    :param N: an int number of individuals in the population
+    :param R: an int number of rounds to simulate
+    :param pi: 'uniform' or 'proportional' punishment
+    :param alpha: the authority's float adamancy (> 0)
+    :param seed: an int seed for random number generation
+    :param window: an int sliding window size for measuring repression
+    :param threshold: a fraction of political cost below which is repression
+    :param xmax: a maximum value for the x-axis, or None if inferred
+    """
+    # Load results means from file.
+    resultsdir = osp.join('..', 'results', f'sweep_N{N}_R{R}_{pi}_S{seed}')
+    deltas = load_np(osp.join(resultsdir, 'deltas.npy'))
+    betas = load_np(osp.join(resultsdir, 'betas.npy'))
+    pol_costs = alpha * load_np(osp.join(resultsdir, 'pol_costs.npy'))[:, :, 0]
+
+    # Compute repression times for total costs.
+    rep_times = np.zeros(pol_costs.shape[0:2], dtype=int)
+    for idx in tqdm(list(np.ndindex(rep_times.shape))):
+        rep_times[idx] = repression_time(pol_costs[idx], window, threshold)
+
+    # Plot the figure.
+    fig, ax = plt.subplots(figsize=(6, 4), dpi=300, facecolor='w',
+                           layout='tight')
+    colors = [cm.lipari(i) for i in np.linspace(0, 1, len(deltas))]
+    for i, delta in enumerate(deltas):
+        if i in [0, 1, 2, len(deltas) - 3, len(deltas) - 2, len(deltas) - 1]:
+            ax.plot(betas, rep_times[i, :], color=colors[i],
+                    label=r'$\delta$ = ' + f'{delta:.3f}')
+        elif i == 3:
+            ax.plot(betas, rep_times[i, :], color=colors[i],
+                    label=r'$\delta$ = ...')
+        else:
+            ax.plot(betas, rep_times[i, :], color=colors[i])
+
+    if xmax is None:
+        xmax = betas.max()
+    ax.set(xlabel=r'Mean Boldness $\beta$', ylabel='Repression Time (Rounds)',
+           xlim=[0, xmax], ylim=[0, None])
+    ax.legend()
+
+    fig.savefig(osp.join('..', 'figs',
+                         f'repression_times_N{N}_R{R}_{pi}_S{seed}.pdf'))
 
 
 if __name__ == "__main__":
@@ -423,6 +488,8 @@ if __name__ == "__main__":
                    threads=args.threads)
         plot_sweep(N=args.num_ind, R=args.rounds, pi=args.pi, alpha=args.alpha,
                    eps=args.epsilon, seed=args.seed)
+        plot_repression_times(N=args.num_ind, R=args.rounds, pi=args.pi,
+                              alpha=args.alpha, seed=args.seed)
     else:
         (taus, psis, nus), pol_costs, pun_costs, deltas, betas = \
             rmhc_trial(N=args.num_ind, R=args.rounds, delta=args.delta,
