@@ -365,33 +365,6 @@ def plot_sweep(N, R, pi, alpha, eps, seed):
     fig.savefig(osp.join('..', 'figs', f'sweep_N{N}_R{R}_{pi}_S{seed}.png'))
 
 
-def repression_time(pol_costs, window, threshold):
-    """
-    Taking an authority's political costs over time, compute the earliest time
-    at which a sliding window falls to a threshold fraction of max. dissent.
-
-    :param pol_costs: a 1xR array of the authority's political costs
-    :param window: an int sliding window size for measuring repression
-    :param threshold: a fraction of political cost below which is repression
-    :returns: the int earliest time at which dissent is repressed
-    """
-    # Do some basic error checking.
-    assert window < len(pol_costs), 'ERROR: window is longer than the costs'
-
-    # Get maximum political cost for the run.
-    max_pol_cost = pol_costs.max()
-
-    # Check the conditions in a sliding window.
-    step = window
-    while step <= len(pol_costs):
-        if pol_costs[step-window:step].mean() < threshold * max_pol_cost:
-            break
-        else:
-            step += 1
-
-    return step
-
-
 def plot_repression_times(N, R, pi, alpha, seed, window=500, threshold=0.25,
                           xmax=None):
     """
@@ -415,7 +388,15 @@ def plot_repression_times(N, R, pi, alpha, seed, window=500, threshold=0.25,
     # Compute repression times for total costs.
     rep_times = np.zeros(pol_costs.shape[0:2], dtype=int)
     for idx in tqdm(list(np.ndindex(rep_times.shape))):
-        rep_times[idx] = repression_time(pol_costs[idx], window, threshold)
+        max_cost = texponential(np.random.default_rng(seed), bound=1,
+                                scale=deltas[idx[0]], size=N).sum()
+        step = window
+        while step <= len(pol_costs[idx]):
+            if pol_costs[idx][step-window:step].mean() < threshold * max_cost:
+                break
+            else:
+                step += 1
+        rep_times[idx] = step
 
     # Plot the figure.
     fig, ax = plt.subplots(figsize=(6, 4), dpi=300, facecolor='w',
