@@ -365,18 +365,18 @@ def plot_sweep(N, R, pi, alpha, eps, seed):
     fig.savefig(osp.join('..', 'figs', f'sweep_N{N}_R{R}_{pi}_S{seed}.png'))
 
 
-def plot_repression_times(N, R, pi, alpha, seed, window=500, threshold=0.25,
-                          xmax=None):
+def plot_suppression_times(N, R, pi, alpha, seed, window=500, threshold=0.25,
+                           xmax=None):
     """
-    Plots the authority's repression times as a function of boldness.
+    Plots the authority's times to suppression as a function of boldness.
 
     :param N: an int number of individuals in the population
     :param R: an int number of rounds to simulate
     :param pi: 'uniform' or 'proportional' punishment
     :param alpha: the authority's float adamancy (> 0)
     :param seed: an int seed for random number generation
-    :param window: an int sliding window size for measuring repression
-    :param threshold: a fraction of political cost below which is repression
+    :param window: an int sliding window size for measuring suppression
+    :param threshold: a fraction of political cost below which is suppression
     :param xmax: a maximum value for the x-axis, or None if inferred
     """
     # Load results means from file.
@@ -385,7 +385,7 @@ def plot_repression_times(N, R, pi, alpha, seed, window=500, threshold=0.25,
     betas = load_np(osp.join(resultsdir, 'betas.npy'))
     pol_costs = alpha * load_np(osp.join(resultsdir, 'pol_costs.npy'))[:, :, 0]
 
-    # Compute repression times for total costs.
+    # Compute suppression times for total costs.
     rep_times = np.zeros(pol_costs.shape[0:2], dtype=int)
     for idx in tqdm(list(np.ndindex(rep_times.shape))):
         max_cost = texponential(np.random.default_rng(seed), bound=1,
@@ -414,12 +414,13 @@ def plot_repression_times(N, R, pi, alpha, seed, window=500, threshold=0.25,
 
     if xmax is None:
         xmax = betas.max()
-    ax.set(xlabel=r'Mean Boldness $\beta$', ylabel='Repression Time (Rounds)',
+    ax.set(xlabel=r'Mean Boldness $\beta$',
+           ylabel='Time to Suppression (Rounds)',
            xlim=[0, xmax], ylim=[0, None])
     ax.legend()
 
     fig.savefig(osp.join('..', 'figs',
-                         f'repression_times_N{N}_R{R}_{pi}_S{seed}.pdf'))
+                         f'suppression_times_N{N}_R{R}_{pi}_S{seed}.pdf'))
 
 
 if __name__ == "__main__":
@@ -469,8 +470,8 @@ if __name__ == "__main__":
                    threads=args.threads)
         plot_sweep(N=args.num_ind, R=args.rounds, pi=args.pi, alpha=args.alpha,
                    eps=args.epsilon, seed=args.seed)
-        plot_repression_times(N=args.num_ind, R=args.rounds, pi=args.pi,
-                              alpha=args.alpha, seed=args.seed)
+        plot_suppression_times(N=args.num_ind, R=args.rounds, pi=args.pi,
+                               alpha=args.alpha, seed=args.seed)
     else:
         (taus, psis, nus), pol_costs, pun_costs, deltas, betas = \
             rmhc_trial(N=args.num_ind, R=args.rounds, delta=args.delta,
