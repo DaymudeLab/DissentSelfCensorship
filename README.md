@@ -23,7 +23,7 @@ cd code
 source .venv/bin/activate
 ```
 
-Figs. 1 and 2 illustrate an individual's optimal action as a function of their desired dissent.
+Figs. 1 and 2 show an individual's optimal action as a function of their desired dissent.
 They are produced with
 
 ```shell
@@ -40,7 +40,7 @@ python phase_diagram.py
 ```
 
 Figs. 4&ndash;5 and S1&ndash;3 all show different results from the adaptive authority simulations.
-They are reproduced with
+They are produced with
 
 ```shell
 python hillclimbing.py -N 100000 -R 5000 -D 0.25 -B 2 -P uniform --seed 458734673
@@ -52,8 +52,9 @@ python hillclimbing.py --sweep -N 100000 -R 10000 -P proportional -A 1.0 -E 0.05
 ```
 
 > [!WARNING]
-> The sweep experiments will take a while to run and may use a lot of memory.
+> The sweep experiments are time and memory intensive.
 > We ran on a a Linux machine with a 5.7 GHz Ryzen 9 7950X CPU (16 cores, 32 threads) and 64 GB of memory, allowing us to parallelize with `--threads 32`.
+> Modify this parameter as appropriate for your machine.
 
 If you want to experiment with the adaptive authority simulations yourself (e.g., with different parameters), the following will print usage information:
 
