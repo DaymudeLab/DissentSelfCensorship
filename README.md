@@ -53,7 +53,7 @@ python hillclimbing.py --sweep -N 100000 -R 10000 -P proportional -A 1.0 -E 0.05
 
 > [!WARNING]
 > The sweep experiments are time and memory intensive.
-> We ran on a a Linux machine with a 5.7 GHz Ryzen 9 7950X CPU (16 cores, 32 threads) and 64 GB of memory, allowing us to parallelize with `--threads 32`.
+> We ran on a a Linux machine with a 5.7 GHz Ryzen 9 7950X CPU (16 cores, 32 threads) and 64 GB of memory, parallelizing with `--threads 32`.
 > Modify this parameter as appropriate for your machine.
 
 If you want to experiment with the adaptive authority simulations yourself (e.g., with different parameters), the following will print usage information:
