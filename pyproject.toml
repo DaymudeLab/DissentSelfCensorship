@@ -1,13 +1,12 @@
 [project]
-name = "censorship-dissent"
-version = "0.1.0"
+name = "dissentselfcensorship"
+version = "1.0.0"
 description = "Analysis and simulations of dissent and self-censorship"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "cmcrameri>=1.9",
     "matplotlib>=3.10.0",
-    "networkx>=3.4.2",
     "numpy>=2.2.2",
     "scipy>=1.15.1",
     "tqdm>=4.67.1",

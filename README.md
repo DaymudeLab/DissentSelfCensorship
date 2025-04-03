@@ -16,11 +16,11 @@ uv sync
 
 ## Reproducibility
 
-To reproduce our data and figures, navigate to the `code/` directory and activate the Python virtual environment:
+To reproduce our data and figures, activate the Python virtual environment and navigate to the `code/` directory:
 
 ```shell
-cd code
 source .venv/bin/activate
+cd code
 ```
 
 Figs. 1 and 2 show an individual's optimal action as a function of their desired dissent.
