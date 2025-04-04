@@ -1,3 +1,6 @@
+[![DOI](https://zenodo.org/badge/542832509.svg)](https://doi.org/10.5281/zenodo.15150163)
+
+
 # DissentSelfCensorship
 
 This repository contains all code supplements and Mathematica derivations for the manuscript "Strategic Analysis of Dissent and Self-Censorship" developed by Joshua J. Daymude, Robert Axelrod, and Stephanie Forrest.
