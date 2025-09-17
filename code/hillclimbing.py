@@ -62,7 +62,7 @@ def texponential(rng, bound, scale, size):
 
     return samples[:size]
 
-
+ass 
 def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed):
     """
     Runs a single simulation trial of the model where individuals' desired
