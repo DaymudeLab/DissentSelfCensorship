@@ -63,7 +63,7 @@ def texponential(rng, bound, scale, size):
     return samples[:size]
 
 
-def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed):
+def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate=1, pair='random'):
     """
     Runs a single simulation trial of the model where individuals' desired
     dissents and boldness constants are exponentially-distributed but fixed and
@@ -110,7 +110,7 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed):
     # Pre-generate all random choices of which parameter to attempt to update
     # at each step; the hope is that doing this in batch is faster than doing
     # one at a time in each for loop iteration.
-    param_choices = rng.integers(3, size=R)
+    #param_choices = rng.integers(3, size=R)
 
     # Simulate the specified number of rounds, allowing the authority to adapt
     # its parameters using random mutation hill climbing (RMHC).
@@ -120,14 +120,32 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed):
         if r == 0:
             params[:, r] = [tau0, psi0, nu0]
         else:
-            p = param_choices[r]  # Choose parameter to update.
             params[:, r] = params[:, r-1]
-            params[p, r] = rng.uniform(max(bounds[p, 0], params[p, r] - eps),
-                                       min(bounds[p, 1], params[p, r] + eps))
-        tau, psi, nu = params[:, r]
+
+        
+        #choose how many params gonna change
+        if k_mutate == 1:
+            idx = [rng.integers(3)]
+        elif k_mutate == 2:
+            if pair == 'random':
+                idx = rng.choice(3, size=2, replace=False)
+            else:
+                pair_map = {'tp': [0,1], 'tn': [0,2], 'pn': [1,2]}
+                # 0:tau,1:psi,2:nu
+                idx = pair_map[pair]
+        # k_mutate == 3
+        else:
+            idx = [0,1,2]
+
+        for p in idx:
+            low  = max(bounds[p, 0], params[p, r] - eps)
+            high = min(bounds[p, 1], params[p, r] + eps)
+            params[p, r] = rng.uniform(low, high)
+
 
         # The individuals act based on their desires and boldness constants and
         # the authority's current parameters.
+        tau, psi, nu = params[:, r]
         acts = opt_actions(deltas, betas, nu, pi, tau, psi)
 
         # The authority punishes any actions that it observes above tolerance.
@@ -263,7 +281,7 @@ def rmhc_sweep(N, R, pi, alpha, eps, seed, granularity, trials, threads):
 
 
 def plot_trial(taus, psis, nus, pol_costs, pun_costs, alpha, pi, delta, beta,
-               title=False):
+               title=False, k_mutate=None, pair=None):
     """
     Plot the evolution of authority costs & parameters in a single RMHC trial.
 
@@ -307,7 +325,13 @@ def plot_trial(taus, psis, nus, pol_costs, pun_costs, alpha, pi, delta, beta,
     ax[1].legend(loc='best', fontsize='small')
     ax[1].set(xlim=[0, R], xlabel=r'Round $r$', ylabel='Parameter Value')
 
-    fig.savefig(osp.join('..', 'figs', 'rmhc_trial.pdf'))
+    #To pecific which k in the file name
+    suffix = ""
+    if k_mutate is not None:
+        suffix += f"_k{k_mutate}"
+    if pair is not None and k_mutate == 2:
+        suffix += f"_{pair}"
+    fig.savefig(osp.join('..', 'figs', f'rmhc_trial{suffix}.pdf'))
 
 
 def plot_sweep(N, R, pi, alpha, eps, seed):
@@ -459,6 +483,18 @@ if __name__ == "__main__":
                         help='Number of trials to run per parameter setting')
     parser.add_argument('--threads', type=int, default=1,
                         help='Number of threads to parallelize over')
+                        
+    #k=1,k=2,k=3
+    parser.add_argument('--k-mutate', type=int, choices=[1,2,3], default=1,
+                    help='How many parameters to mutate per step (1, 2, or 3).')
+
+    parser.add_argument('--pair', type=str, choices=['random','tp','tn','pn'], default='random',
+                    help='When k=2: choose which two to mutate. tp=(tau,psi), tn=(tau,nu), pn=(psi,nu).')
+
+    parser.add_argument('--run-all-k', action='store_true',
+                    help='If set, run trials for k=1,2,3 sequentially.')
+
+    
     args = parser.parse_args()
 
     # Run a single trial or sweep experiment.
@@ -477,6 +513,8 @@ if __name__ == "__main__":
             rmhc_trial(N=args.num_ind, R=args.rounds, delta=args.delta,
                        beta=args.beta, pi=args.pi, tau0=args.tau,
                        psi0=args.psi, nu0=args.nu, alpha=args.alpha,
-                       eps=args.epsilon, seed=args.seed)
+                       eps=args.epsilon, seed=args.seed,
+                       k_mutate=args.k_mutate, pair=args.pair)
         plot_trial(taus, psis, nus, pol_costs, pun_costs, args.alpha, args.pi,
-                   args.delta, args.beta)
+                   args.delta, args.beta, title=False,
+           k_mutate=args.k_mutate, pair=args.pair)
