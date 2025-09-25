@@ -63,7 +63,7 @@ def texponential(rng, bound, scale, size):
     return samples[:size]
 
 
-def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate=1, pair='random'):
+def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate=1, pair='random', k3_method='sphere'):
     """
     Runs a single simulation trial of the model where individuals' desired
     dissents and boldness constants are exponentially-distributed but fixed and
@@ -120,27 +120,55 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate
         if r == 0:
             params[:, r] = [tau0, psi0, nu0]
         else:
-            params[:, r] = params[:, r-1]
+            #params[:, r] = params[:, r-1]
+            candidate_params = np.copy(params[:, r-1])
 
         
-        #choose how many params gonna change
-        if k_mutate == 1:
-            idx = [rng.integers(3)]
-        elif k_mutate == 2:
-            if pair == 'random':
-                idx = rng.choice(3, size=2, replace=False)
-            else:
-                pair_map = {'tp': [0,1], 'tn': [0,2], 'pn': [1,2]}
-                # 0:tau,1:psi,2:nu
-                idx = pair_map[pair]
-        # k_mutate == 3
-        else:
-            idx = [0,1,2]
+            #choose how many params gonna change
+            if k_mutate == 1:
+                idx = rng.integers(3)
 
-        for p in idx:
-            low  = max(bounds[p, 0], params[p, r] - eps)
-            high = min(bounds[p, 1], params[p, r] + eps)
-            params[p, r] = rng.uniform(low, high)
+                low  = max(bounds[idx, 0], candidate_params[idx] - eps)
+                high = min(bounds[idx, 1], candidate_params[idx] + eps)
+                candidate_params[idx] = rng.uniform(low, high)
+
+            elif k_mutate == 2:
+                if pair == 'random':
+                    idx_pair = rng.choice(3, size=2, replace=False)
+                else:
+                    pair_map = {'tp': [0,1], 'tn': [0,2], 'pn': [1,2]}
+                    # 0:tau,1:psi,2:nu
+                    idx_pair = pair_map[pair]
+
+                for p in idx_pair:
+                    low  = max(bounds[p, 0], candidate_params[p] - eps)
+                    high = min(bounds[p, 1], candidate_params[p] + eps)
+                    candidate_params[p] = rng.uniform(low, high)
+            # k_mutate == 3
+            else:
+            # Mutate all three parameters
+                if k3_method == 'box':
+                        # Sample uniformly from a cube around the current point.
+                    for p in range(3):
+                        low  = max(bounds[p, 0], candidate_params[p] - eps)
+                        high = min(bounds[p, 1], candidate_params[p] + eps)
+                        candidate_params[p] = rng.uniform(low, high)
+                    
+                elif k3_method == 'sphere':
+                        # Sample uniformly from a sphere around the current point.
+                    while True:
+                        offset = rng.uniform(-eps, eps, size=3)
+                        if np.sum(offset**2) <= eps**2:
+                            candidate_params += offset
+                            break
+                        
+                        # Clip the new values to stay within bounds.
+                    candidate_params[0] = np.clip(candidate_params[0], bounds[0, 0], bounds[0, 1])
+                    candidate_params[1] = max(candidate_params[1], bounds[1, 0])
+                    candidate_params[2] = np.clip(candidate_params[2], bounds[2, 0], bounds[2, 1])
+
+                # Set the current parameters to the new candidate for this round.
+            params[:, r] = candidate_params
 
 
         # The individuals act based on their desires and boldness constants and
@@ -171,7 +199,7 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate
     return params, pol_costs, pun_costs, deltas, betas
 
 
-def sweep_worker(idx, db, N, R, pi, tau0s, psi0s, nu0s, alpha, eps, seeds):
+def sweep_worker(idx, db, N, R, pi, tau0s, psi0s, nu0s, alpha, eps, seeds, k_mutate, pair, k3_method):
     """
     Worker function handling the repeated RMHC trials for a single setting of
     (delta, beta).
@@ -210,7 +238,7 @@ def sweep_worker(idx, db, N, R, pi, tau0s, psi0s, nu0s, alpha, eps, seeds):
     for t in range(len(seeds)):
         w_params[t], w_pol_costs[t], w_pun_costs[t], _, _ = \
             rmhc_trial(N, R, delta, beta, pi, tau0s[t], psi0s[t], nu0s[t],
-                       alpha, eps, seeds[t])
+                       alpha, eps, seeds[t], k_mutate, pair, k3_method)
 
     # Return the index + means/standard deviations across trials.
     return (idx, w_params.mean(axis=0), w_params.std(axis=0),
@@ -218,7 +246,7 @@ def sweep_worker(idx, db, N, R, pi, tau0s, psi0s, nu0s, alpha, eps, seeds):
             w_pun_costs.mean(axis=0), w_pun_costs.std(axis=0))
 
 
-def rmhc_sweep(N, R, pi, alpha, eps, seed, granularity, trials, threads):
+def rmhc_sweep(N, R, pi, alpha, eps, seed, granularity, trials, threads, k_mutate, pair, k3_method):
     """
     Varying the population's mean desired dissent and boldness as independent
     variables and randomly initializing the authority's parameters, measure the
@@ -260,7 +288,7 @@ def rmhc_sweep(N, R, pi, alpha, eps, seed, granularity, trials, threads):
     dbs = list(product(deltas, betas))
     p = process_map(sweep_worker, idxs, dbs, repeat(N), repeat(R), repeat(pi),
                     repeat(tau0s), repeat(psi0s), repeat(nu0s), repeat(alpha),
-                    repeat(eps), repeat(seeds), max_workers=threads,
+                    repeat(eps), repeat(seeds), repeat(k_mutate), repeat(pair), repeat(k3_method), max_workers=threads,
                     chunksize=1)
     for (i, j), w_params_mean, w_params_std, w_pol_costs_mean, \
             w_pol_costs_std, w_pun_costs_mean, w_pun_costs_std in p:
@@ -281,7 +309,7 @@ def rmhc_sweep(N, R, pi, alpha, eps, seed, granularity, trials, threads):
 
 
 def plot_trial(taus, psis, nus, pol_costs, pun_costs, alpha, pi, delta, beta,
-               title=False, k_mutate=None, pair=None):
+               title=False, k_mutate=None, pair=None, k3_method=None):
     """
     Plot the evolution of authority costs & parameters in a single RMHC trial.
 
@@ -331,6 +359,8 @@ def plot_trial(taus, psis, nus, pol_costs, pun_costs, alpha, pi, delta, beta,
         suffix += f"_k{k_mutate}"
     if pair is not None and k_mutate == 2:
         suffix += f"_{pair}"
+    if k3_method is not None and k_mutate == 3:
+        suffix += f"_{k3_method}"
     fig.savefig(osp.join('..', 'figs', f'rmhc_trial{suffix}.pdf'))
 
 
@@ -493,6 +523,8 @@ if __name__ == "__main__":
 
     parser.add_argument('--run-all-k', action='store_true',
                     help='If set, run trials for k=1,2,3 sequentially.')
+    parser.add_argument('--k3-method', type=str, choices=['box', 'sphere'], default='sphere',
+                    help='When k=3: mutation method (box or sphere).')
 
     
     args = parser.parse_args()
@@ -503,7 +535,8 @@ if __name__ == "__main__":
         rmhc_sweep(N=args.num_ind, R=args.rounds, pi=args.pi, alpha=args.alpha,
                    eps=args.epsilon, seed=args.seed,
                    granularity=args.granularity, trials=args.trials,
-                   threads=args.threads)
+                   threads=args.threads, k_mutate=args.k_mutate,
+           pair=args.pair, k3_method=args.k3_method)
         plot_sweep(N=args.num_ind, R=args.rounds, pi=args.pi, alpha=args.alpha,
                    eps=args.epsilon, seed=args.seed)
         plot_suppression_times(N=args.num_ind, R=args.rounds, pi=args.pi,
@@ -514,7 +547,7 @@ if __name__ == "__main__":
                        beta=args.beta, pi=args.pi, tau0=args.tau,
                        psi0=args.psi, nu0=args.nu, alpha=args.alpha,
                        eps=args.epsilon, seed=args.seed,
-                       k_mutate=args.k_mutate, pair=args.pair)
+                       k_mutate=args.k_mutate, pair=args.pair, k3_method=args.k3_method)
         plot_trial(taus, psis, nus, pol_costs, pun_costs, args.alpha, args.pi,
                    args.delta, args.beta, title=False,
-           k_mutate=args.k_mutate, pair=args.pair)
+                   k_mutate=args.k_mutate, pair=args.pair, k3_method=args.k3_method)
