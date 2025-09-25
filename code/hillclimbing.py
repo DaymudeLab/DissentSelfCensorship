@@ -125,6 +125,13 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate
 
         
             #choose how many params gonna change
+
+            # --k-mutate [1,2,3]: Sets whether to mutate 1, 2, or all 3 parameters at each step.
+
+            # --pair [tp,tn,pn]: For k=2, specifies which parameter pair to mutate (t=tolerance, p=psi, n=nu).
+
+            # --k3-method [box,sphere]: For k=3, sets the mutation method to sample from a cube (box) or a sphere.
+            
             if k_mutate == 1:
                 idx = rng.integers(3)
 
