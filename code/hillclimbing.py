@@ -162,17 +162,20 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate
                         candidate_params[p] = rng.uniform(low, high)
                     
                 elif k3_method == 'sphere':
-                        # Sample uniformly from a sphere around the current point.
-                    while True:
-                        offset = rng.uniform(-eps, eps, size=3)
-                        if np.sum(offset**2) <= eps**2:
-                            candidate_params += offset
-                            break
                         
-                        # Clip the new values to stay within bounds.
-                    candidate_params[0] = np.clip(candidate_params[0], bounds[0, 0], bounds[0, 1])
-                    candidate_params[1] = max(candidate_params[1], bounds[1, 0])
-                    candidate_params[2] = np.clip(candidate_params[2], bounds[2, 0], bounds[2, 1])
+                    angle = rng.normal(size=3) #sample from normal distribution
+                    angle /= np.linalg.norm(angle) #get unit vector
+
+                    #magnitude = eps * (rng.random()**(1/3.0)) #uniform in sphere, inverse transform sampling, 4/3 pi r^3 volume
+                    magnitude = eps * rng.random() #clusters towards middle of sphere
+
+                    move = angle * magnitude
+                    candidate_params += move
+
+                     # Clip the new values to stay within bounds.
+                candidate_params[0] = np.clip(candidate_params[0], bounds[0, 0], bounds[0, 1])
+                candidate_params[1] = max(candidate_params[1], bounds[1, 0])
+                candidate_params[2] = np.clip(candidate_params[2], bounds[2, 0], bounds[2, 1])
 
                 # Set the current parameters to the new candidate for this round.
             params[:, r] = candidate_params
