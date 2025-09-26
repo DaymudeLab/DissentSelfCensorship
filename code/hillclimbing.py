@@ -219,7 +219,7 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate
 #visualize params
 def _plot_candidates_2d(cands_history, plane='tau-psi', every=1):
     """
-    ONly draw candidate params with 2D
+    ONly draw candidate params with 2D （project the param on the plane)
     :param cands_history: list of 1x3 arrays in order [tau, psi, nu] for each round's candidate
     :param plane: 'tau-psi' | 'tau-nu' | 'psi-nu'
     :param every: int
@@ -238,6 +238,7 @@ def _plot_candidates_2d(cands_history, plane='tau-psi', every=1):
     plt.scatter(x, y, s=8, alpha=0.5)
     plt.xlabel(xlab); plt.ylabel(ylab)
     plt.title(f"Candidate parameters per round ({xlab} vs {ylab})")
+    
     # visualized boundry（tau/nu ∈ [0,1]；psi ≥ 0）
     if xlab in ('tau', 'nu'): plt.xlim(-0.02, 1.02)
     if ylab in ('tau', 'nu'): plt.ylim(-0.02, 1.02)
