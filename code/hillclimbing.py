@@ -127,7 +127,7 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate
             candidate_params = np.copy(params[:, r-1])
 
         
-            #choose how many params gonna change
+            #choose how many params gonna changeeeee
 
             # --k-mutate [1,2,3]: Sets whether to mutate 1, 2, or all 3 parameters at each step.
 
