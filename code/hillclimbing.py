@@ -63,7 +63,7 @@ def texponential(rng, bound, scale, size):
     return samples[:size]
 
 
-def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed, num_samples=50, k_mutate=1, pair='random', k3_method='sphere'):
+def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate=1, pair='random', k3_method='sphere'):
     """
     Runs a single simulation trial of the model where individuals' desired
     dissents and boldness constants are exponentially-distributed but fixed and
@@ -99,15 +99,13 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed, num_sam
     betas = rng.exponential(scale=beta, size=N)
 
     # Set bounds on the authority's parameters.
-    #bounds = np.array([[0, 1],          # tau
-    #                   [1e-9, np.inf],  # psi
-    #                   [0, 1]])         # nu
+    bounds = np.array([[0, 1],          # tau
+                       [1e-9, np.inf],  # psi
+                       [0, 1]])         # nu
 
     # Set up arrays to store everything that happens.
     params = np.zeros((3, R))
     pol_costs, pun_costs = np.zeros(R), np.zeros(R)
-
-    acts = np.zeros(N)  #so no errors for the first round
     
     #define plot params
     cands_history = []
@@ -125,13 +123,68 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed, num_sam
         if r == 0:
             params[:, r] = [tau0, psi0, nu0]
         else:
-            best_candidate = find_best_candidate(current_params=params[:, r-1], previous_acts=acts, N=N, alpha=alpha, pi=pi, eps=eps, rng=rng, num_samples=num_samples, k_mutate=k_mutate, pair=pair, k3_method=k3_method)
+            #params[:, r] = params[:, r-1]
+            candidate_params = np.copy(params[:, r-1])
+
+        
+            #choose how many params gonna change
+
+            # --k-mutate [1,2,3]: Sets whether to mutate 1, 2, or all 3 parameters at each step.
+
+            # --pair [tp,tn,pn]: For k=2, specifies which parameter pair to mutate (t=tolerance, p=psi, n=nu).
+
+            # --k3-method [box,sphere]: For k=3, sets the mutation method to sample from a cube (box) or a sphere.
+            
+            if k_mutate == 1:
+                idx = rng.integers(3)
+
+                low  = max(bounds[idx, 0], candidate_params[idx] - eps)
+                high = min(bounds[idx, 1], candidate_params[idx] + eps)
+                candidate_params[idx] = rng.uniform(low, high)
+
+            elif k_mutate == 2:
+                if pair == 'random':
+                    idx_pair = rng.choice(3, size=2, replace=False)
+                else:
+                    pair_map = {'tp': [0,1], 'tn': [0,2], 'pn': [1,2]}
+                    # 0:tau,1:psi,2:nu
+                    idx_pair = pair_map[pair]
+
+                for p in idx_pair:
+                    low  = max(bounds[p, 0], candidate_params[p] - eps)
+                    high = min(bounds[p, 1], candidate_params[p] + eps)
+                    candidate_params[p] = rng.uniform(low, high)
+            # k_mutate == 3
+            else:
+            # Mutate all three parameters
+                if k3_method == 'box':
+                        # Sample uniformly from a cube around the current point.
+                    for p in range(3):
+                        low  = max(bounds[p, 0], candidate_params[p] - eps)
+                        high = min(bounds[p, 1], candidate_params[p] + eps)
+                        candidate_params[p] = rng.uniform(low, high)
+                    
+                elif k3_method == 'sphere':
+                        
+                    angle = rng.normal(size=3) #sample from normal distribution
+                    angle /= np.linalg.norm(angle) #get unit vector
+
+                    magnitude = eps * (rng.random()**(1/3.0)) #uniform in sphere, inverse transform sampling, 4/3 pi r^3 volume
+                    #magnitude = eps * rng.random() #clusters towards middle of sphere
+
+                    move = angle * magnitude
+                    candidate_params += move
+
+                     # Clip the new values to stay within bounds.
+                candidate_params[0] = np.clip(candidate_params[0], bounds[0, 0], bounds[0, 1])
+                candidate_params[1] = max(candidate_params[1], bounds[1, 0])
+                candidate_params[2] = np.clip(candidate_params[2], bounds[2, 0], bounds[2, 1])
 
                 # Set the current parameters to the new candidate for this round.
-            params[:, r] = best_candidate
-
+            params[:, r] = candidate_params
+            
             #record params
-            cands_history.append(best_candidate.copy())
+            cands_history.append(candidate_params.copy())
 
         # The individuals act based on their desires and boldness constants and
         # the authority's current parameters.
@@ -154,120 +207,15 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed, num_sam
 
         # If the authority's adamancy-weighted cost in this round is worse than
         # last round, reset to last round's parameters.
-
-        #we already found the best candidate, so no need to check if it's better
-        #if r > 0 and alpha * pol_costs[r] + pun_costs[r] > \
-        #        alpha * pol_costs[r-1] + pun_costs[r-1]:
-        #    params[:, r] = params[:, r-1]
+        if r > 0 and alpha * pol_costs[r] + pun_costs[r] > \
+                alpha * pol_costs[r-1] + pun_costs[r-1]:
+            params[:, r] = params[:, r-1]
             
     #after getting all params, plot!
     _plot_candidates_2d(cands_history)
 
     return params, pol_costs, pun_costs, deltas, betas
-
-def find_best_candidate(current_params, previous_acts, N, alpha, pi, eps, rng, num_samples=50, k_mutate=3, pair='random', k3_method='sphere'):
-    """
-    Generates multiple candidate parameter sets, evaluates their hypothetical cost
-    against the previous round's actions, and returns the best one.
-
-    :param current_params: a 1x3 array of the authority's current parameters [tau, psi, nu]
-    :param previous_acts: a 1xN array of individuals' actions from the previous round
-    :param N: an int number of individuals in the population
-    :param alpha: the authority's float adamancy (> 0)
-    :param pi: 'uniform' or 'proportional' punishment
-    :param eps: the float update window radius for RMHC
-    :param rng: a numpy.random.Generator instance for random number generation
-    :param num_samples: an int number of candidate samples to evaluate
-    :returns: a 1x3 array of the best candidate parameters found
-    """
-    best_candidate = np.copy(current_params)
-
-    min_hypothetical_cost = np.inf #worst cost
-
-    # Set bounds on the authority's parameters.
-    bounds = np.array([[0, 1],          # tau
-                       [1e-9, np.inf],  # psi
-                       [0, 1]])         # nu
     
-    for _ in range(num_samples):
-        candidate_params = np.copy(current_params)
-
-        #mutation logic moved to this function
-
-        #choose how many params gonna change
-
-        # --k-mutate [1,2,3]: Sets whether to mutate 1, 2, or all 3 parameters at each step.
-
-        # --pair [tp,tn,pn]: For k=2, specifies which parameter pair to mutate (t=tolerance, p=psi, n=nu).
-
-        # --k3-method [box,sphere]: For k=3, sets the mutation method to sample from a cube (box) or a sphere.
-        
-        if k_mutate == 1:
-            idx = rng.integers(3)
-
-            low  = max(bounds[idx, 0], candidate_params[idx] - eps)
-            high = min(bounds[idx, 1], candidate_params[idx] + eps)
-            candidate_params[idx] = rng.uniform(low, high)
-
-        elif k_mutate == 2:
-            if pair == 'random':
-                idx_pair = rng.choice(3, size=2, replace=False)
-            else:
-                pair_map = {'tp': [0,1], 'tn': [0,2], 'pn': [1,2]}
-                # 0:tau,1:psi,2:nu
-                idx_pair = pair_map[pair]
-
-            for p in idx_pair:
-                low  = max(bounds[p, 0], candidate_params[p] - eps)
-                high = min(bounds[p, 1], candidate_params[p] + eps)
-                candidate_params[p] = rng.uniform(low, high)
-        # k_mutate == 3
-        else:
-        # Mutate all three parameters
-            if k3_method == 'box':
-                    # Sample uniformly from a cube around the current point.
-                for p in range(3):
-                    low  = max(bounds[p, 0], candidate_params[p] - eps)
-                    high = min(bounds[p, 1], candidate_params[p] + eps)
-                    candidate_params[p] = rng.uniform(low, high)
-                
-            elif k3_method == 'sphere':
-                    
-                angle = rng.normal(size=3) #sample from normal distribution
-                angle /= np.linalg.norm(angle) #get unit vector
-
-                magnitude = eps * (rng.random()**(1/3.0)) #uniform in sphere, inverse transform sampling, 4/3 pi r^3 volume
-                #magnitude = eps * rng.random() #clusters towards middle of sphere
-
-                move = angle * magnitude
-                candidate_params += move
-
-                    # Clip the new values to stay within bounds.
-            candidate_params[0] = np.clip(candidate_params[0], bounds[0, 0], bounds[0, 1])
-            candidate_params[1] = max(candidate_params[1], bounds[1, 0])
-            candidate_params[2] = np.clip(candidate_params[2], bounds[2, 0], bounds[2, 1])
-
-            #hypothetical cost calculation
-            
-            tau_cand, psi_cand, nu_cand = candidate_params
-
-            cond = (previous_acts > tau_cand) & (rng.random(N) < (nu_cand + (1 - nu_cand) * previous_acts))
-            if pi == 'uniform':
-                punish_hypo = cond * psi_cand
-
-            elif pi == 'proportional':
-                punish_hypo = cond * psi_cand * (previous_acts - tau_cand)
-
-            pol_cost_hypo = previous_acts.sum()
-            pun_cost_hypo = punish_hypo.sum()
-            total_hypothetical_cost = alpha * pol_cost_hypo + pun_cost_hypo
-
-            if total_hypothetical_cost < min_hypothetical_cost:
-                min_hypothetical_cost = total_hypothetical_cost
-                best_candidate = candidate_params
-
-    return best_candidate
-
 #visualize params
 def _plot_candidates_2d(cands_history, plane='tau-psi', every=1):
     """
