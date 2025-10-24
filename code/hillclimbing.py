@@ -170,9 +170,7 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate
                     angle /= np.linalg.norm(angle) #get unit vector
 
                     #magnitude = eps * (rng.random()**(1/3.0)) #uniform in sphere, inverse transform sampling, 4/3 pi r^3 volume
-                    #magnitude = eps * rng.random() #clusters towards middle of sphere
-
-                    magnitude = eps
+                    magnitude = eps * rng.random() #clusters towards middle of sphere
 
                     move = angle * magnitude
                     candidate_params += move
