@@ -212,7 +212,7 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate
             params[:, r] = params[:, r-1]
             
     #after getting all params, plot!
-    _plot_candidates_2d(cands_history)
+    #_plot_candidates_2d(cands_history)
 
     return params, pol_costs, pun_costs, deltas, betas
     
