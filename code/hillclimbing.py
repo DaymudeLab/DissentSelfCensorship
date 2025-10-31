@@ -19,6 +19,12 @@ import os.path as osp
 from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 
+#bayesian optimization imports
+from skopt import gp_minimize
+from skopt.plots import plot_convergence, plot_evaluations, plot_objective
+from skopt.space import Real
+
+
 
 def texponential(rng, bound, scale, size):
     """
@@ -62,31 +68,17 @@ def texponential(rng, bound, scale, size):
 
     return samples[:size]
 
-
-def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed):
+def run_bayesian_optimization(N, R, delta, beta, pi, alpha, seed):
     """
-    Runs a single simulation trial of the model where individuals' desired
-    dissents and boldness constants are exponentially-distributed but fixed and
-    the authority adapts its parameters based on random mutation hill climbing.
-
-    :param N: an int number of individuals in the population
-    :param R: an int number of rounds to simulate
-    :param delta: a float mean population desired dissent (> 0)
-    :param beta: a float mean population boldness (> 0)
+    :param N: int number of individuals
+    :param R_: int number of calls (budget) for gp_minimize
+    :param delta: float mean population desired dissent
+    :param beta: float mean population boldness
     :param pi: 'uniform' or 'proportional' punishment
-    :param tau0: the authority's float initial tolerance (in [0,1])
-    :param psi0: the authority's float initial punishment severity (> 0)
-    :param nu0: the authority's float initial surveillance (in [0,1])
-    :param alpha: the authority's float adamancy (> 0)
-    :param eps: the float update window radius for RMHC
-    :param seed: an int seed for random number generation
-
-    :returns: a 3xR array of the authority's parameter values
-    :returns: a 1xR array of the authority's political costs
-    :returns: a 1xR array of the authority's punishment costs
-    :returns: a 1xN array of individuals' dissent desires
-    :returns: a 1xN array of individuals' boldness constants
+    :param alpha: float authority's adamancy
+    :param seed: int seed for this trial's random number generator
     """
+
     # Set up random number generation.
     rng = np.random.default_rng(seed)
 
@@ -98,224 +90,161 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed):
     # exponential distribution with the given mean.
     betas = rng.exponential(scale=beta, size=N)
 
-    # Set bounds on the authority's parameters.
-    bounds = np.array([[0, 1],          # tau
-                       [1e-9, np.inf],  # psi
-                       [0, 1]])         # nu
+    dimensions = [
+        Real(0.0, 1.0, name='tau'),
+        Real(1e-9, 20.0, name='psi'), # Using 20 as upper bound for now
+        Real(0.0, 1.0, name='nu')
+    ]
 
-    # Set up arrays to store everything that happens.
-    params = np.zeros((3, R))
-    pol_costs, pun_costs = np.zeros(R), np.zeros(R)
+    def eval_authority_costs(params):
+        tau = params[0]
+        psi = params[1] 
+        nu = params[2]  
 
-    # Pre-generate all random choices of which parameter to attempt to update
-    # at each step; the hope is that doing this in batch is faster than doing
-    # one at a time in each for loop iteration.
-    param_choices = rng.integers(3, size=R)
-
-    # Simulate the specified number of rounds, allowing the authority to adapt
-    # its parameters using random mutation hill climbing (RMHC).
-    for r in range(R):
-        # If this is the first round, the authority simply uses its initial
-        # parameters. Otherwise, it generates new candidate parameters to test.
-        if r == 0:
-            params[:, r] = [tau0, psi0, nu0]
-        else:
-            p = param_choices[r]  # Choose parameter to update.
-            params[:, r] = params[:, r-1]
-            params[p, r] = rng.uniform(max(bounds[p, 0], params[p, r] - eps),
-                                       min(bounds[p, 1], params[p, r] + eps))
-        tau, psi, nu = params[:, r]
-
-        # The individuals act based on their desires and boldness constants and
-        # the authority's current parameters.
         acts = opt_actions(deltas, betas, nu, pi, tau, psi)
-
-        # The authority punishes any actions that it observes above tolerance.
         cond = (acts > tau) & (rng.random(N) < (nu + (1 - nu) * acts))
+
         if pi == 'uniform':
             punish = cond * psi
         elif pi == 'proportional':
             punish = cond * psi * (acts - tau)
-        else:
-            assert False, f'ERROR: Invalid punishment function \"{pi}\"'
+        
+        pol_cost = acts.sum()
+        pun_cost = punish.sum()
 
-        # The authority's political cost for this round is the summed actions
-        # and its punishment cost is the summed punishments.
-        pol_costs[r] = acts.sum()
-        pun_costs[r] = punish.sum()
+        # authority's adamancy-weighted cost
+        total_cost = alpha * pol_cost + pun_cost
 
-        # If the authority's adamancy-weighted cost in this round is worse than
-        # last round, reset to last round's parameters.
-        if r > 0 and alpha * pol_costs[r] + pun_costs[r] > \
-                alpha * pol_costs[r-1] + pun_costs[r-1]:
-            params[:, r] = params[:, r-1]
+        return (total_cost, pol_cost, pun_cost)
+    
+    # gp_minimize needs a function that returns the single it is trying to minimize (total cost/negative utility)
+    def objective_func(params):
+        total_cost, _, _ = eval_authority_costs(params)
+        return total_cost
 
-    return params, pol_costs, pun_costs, deltas, betas
+    n_warmup = max(10, int(R * 0.2)) # 20% warmup
+
+    res = gp_minimize(func=objective_func, dimensions=dimensions, n_calls=R, 
+                      n_initial_points=n_warmup, noise="gaussian", random_state=seed)
+    
+    best_params = res.x
+    best_total_cost, best_pol_cost, best_pun_cost = eval_authority_costs(best_params)
+
+    return (best_total_cost, best_pol_cost, best_pun_cost, best_params, res)
 
 
-def sweep_worker(idx, db, N, R, pi, tau0s, psi0s, nu0s, alpha, eps, seeds):
+def bo_sweep_worker(idx, db, N, R_calls, pi, alpha, seeds):
     """
-    Worker function handling the repeated RMHC trials for a single setting of
-    (delta, beta).
+    Worker function handling the repeated BO trials for a single setting of
+    (delta, beta). This replaces the old sweep_worker
 
-    :param idx: a tuple (i, j) representing this parameter setting's index
-    :param db: a tuple (delta, beta) of the float mean population desired
-    dissent (> 0) and the float mean population boldness (> 0)
-    :param N: an int number of individuals in the population
-    :param R: an int number of rounds to simulate
+    :param idx: tuple (i, j) index for this (delta, beta) pair
+    :param db: tuple (delta, beta) values
+    :param N: int number of individuals
+    :param R_calls: int number of calls (budget) for gp_minimize
     :param pi: 'uniform' or 'proportional' punishment
-    :param tau0s: a 1xT array of the authority's float initial tolerances
-    :param psi0s: a 1xT array of the authority's float initial severities
-    :param nu0s: a 1xT array of the authority's float initial surveillances
-    :param alpha: the authority's float adamancy (> 0)
-    :param eps: the float update window radius for RMHC
-    :param seeds: a 1xT array of int seeds for random number generation
-
-    :returns: the tuple (i, j) representing this parameter setting's index
-    :returns: a 3xR array of the authority's mean parameters per round
-    :returns: a 3xR array of the authority's parameter standard deviations per
-    round
-    :returns: a 1xR array of the authority's mean political costs per round
-    :returns: a 1xR array of the authority's political cost standard deviations
-    per round
-    :returns: a 1xR array of the authority's mean punishment costs per round
-    :returns: a 1xR array of the authority's punishment cost standard
-    deviations per round
+    :param alpha: float authority's adamancy
+    :param seeds: a 1xT array of int seeds, one for each trial
+    :returns: (idx, params_mean, params_std, costs_mean, costs_std)
     """
-    # Set up worker-specific results arrays.
-    w_params = np.zeros((len(seeds), 3, R))
-    w_pol_costs = np.zeros((len(seeds), R))
-    w_pun_costs = np.zeros((len(seeds), R))
+    # Set up worker-specific results arrays
+    w_params = np.zeros((len(seeds), 3))
+    w_costs = np.zeros(len(seeds))       
+    w_pol_costs = np.zeros(len(seeds))   
+    w_pun_costs = np.zeros(len(seeds))
 
-    # Run the specified number of trials for this parameter setting.
+    # Get the (delta, beta) for this worker
     delta, beta = db
-    for t in range(len(seeds)):
-        w_params[t], w_pol_costs[t], w_pun_costs[t], _, _ = \
-            rmhc_trial(N, R, delta, beta, pi, tau0s[t], psi0s[t], nu0s[t],
-                       alpha, eps, seeds[t])
 
-    # Return the index + means/standard deviations across trials.
-    return (idx, w_params.mean(axis=0), w_params.std(axis=0),
+    # Run the specified number of trials for this parameter setting
+    for t in range(len(seeds)):
+        # Call your new function for each trial
+        best_total_cost, best_pol_cost, best_pun_cost, best_params_list, _ = run_bayesian_optimization(
+            N, R_calls, delta, beta, pi, alpha, seeds[t]
+        )
+        
+        # Store the single best result for this trial
+        w_costs[t] = best_total_cost
+        w_pol_costs[t] = best_pol_cost
+        w_pun_costs[t] = best_pun_cost
+        w_params[t, :] = best_params_list
+
+    # Return the index + means/standard deviations across all trials
+    return (idx, 
+            w_params.mean(axis=0), w_params.std(axis=0),
+            w_costs.mean(axis=0), w_costs.std(axis=0),
             w_pol_costs.mean(axis=0), w_pol_costs.std(axis=0),
             w_pun_costs.mean(axis=0), w_pun_costs.std(axis=0))
 
 
-def rmhc_sweep(N, R, pi, alpha, eps, seed, granularity, trials, threads):
+def bo_sweep(N, R, pi, alpha, seed, granularity, trials, threads):   
     """
-    Varying the population's mean desired dissent and boldness as independent
-    variables and randomly initializing the authority's parameters, measure the
-    authority's final parameter values after a fixed number of rounds. In each
-    random trial, record the authority's parameters over time, the population's
-    desired dissents and boldness constants, and the random seed. This is
-    sufficient to reconstruct the entire trajectory of actions and punishments.
+    Varying the population's mean desired dissent and boldness, and running a
+    full Bayesian Optimization for each to find the authority's optimal costs and params
 
     :param N: an int number of individuals in the population
     :param R: an int number of rounds to simulate
     :param pi: 'uniform' or 'proportional' punishment
     :param alpha: the authority's float adamancy (> 0)
-    :param eps: the float update window radius for RMHC
     :param seed: an int seed for random number generation
     :param granularity: an int number of delta and beta values to sweep over
     :param trials: an int number of trials to run per parameter setting
     :param threads: an int number of threads to parallelize over
     """
+
     # Set up the independent variables.
     deltas = np.linspace(0.005, 0.495, granularity)
     betas = np.linspace(0.1, 10, granularity)
 
-    # Set up random seeds and initial authority parameters for the trials.
+    params_res = np.zeros((granularity, granularity, trials, 3)) # tau, psi, nu
+    costs_res = np.zeros((granularity, granularity, trials)) # total_cost
+
+    # Set up random seeds for the trials
     rng = np.random.default_rng(seed)
     seeds = rng.integers(0, 2**32, size=trials)
-    tau0s = rng.random(size=trials)
-    psi0s = rng.random(size=trials)
-    nu0s = rng.random(size=trials)
 
-    # Set up results containers: for each (delta, beta) pair, we store the mean
-    # and standard deviation of the three parameters, political costs, and
-    # punishment costs in each round across all trials.
-    params = np.zeros((granularity, granularity, 2, 3, R))
-    pol_costs = np.zeros((granularity, granularity, 2, R))
-    pun_costs = np.zeros((granularity, granularity, 2, R))
+    # Set up results containers
+    # We store mean/std of final params and costs
+    params = np.zeros((granularity, granularity, 2, 3))
+    costs = np.zeros((granularity, granularity, 2))
+    pol_costs = np.zeros((granularity, granularity, 2))
+    pun_costs = np.zeros((granularity, granularity, 2))
 
-    # Run the experiment with the specified number of parallel threads.
+    # Run the experiment with the specified number of parallel threads
     idxs = list(product(range(granularity), range(granularity)))
     dbs = list(product(deltas, betas))
-    p = process_map(sweep_worker, idxs, dbs, repeat(N), repeat(R), repeat(pi),
-                    repeat(tau0s), repeat(psi0s), repeat(nu0s), repeat(alpha),
-                    repeat(eps), repeat(seeds), max_workers=threads,
-                    chunksize=1)
-    for (i, j), w_params_mean, w_params_std, w_pol_costs_mean, \
-            w_pol_costs_std, w_pun_costs_mean, w_pun_costs_std in p:
+
+    p = process_map(bo_sweep_worker, idxs, dbs, repeat(N), repeat(R),
+                    repeat(pi), repeat(alpha), repeat(seeds),
+                    max_workers=threads, chunksize=1)
+    
+    # Collect and store results
+    for (i, j), w_params_mean, w_params_std, \
+                w_costs_mean, w_costs_std, \
+                w_pol_costs_mean, w_pol_costs_std, \
+                w_pun_costs_mean, w_pun_costs_std in p:
+        
         params[i, j, 0] = w_params_mean
         params[i, j, 1] = w_params_std
+        costs[i, j, 0] = w_costs_mean
+        costs[i, j, 1] = w_costs_std
         pol_costs[i, j, 0] = w_pol_costs_mean
         pol_costs[i, j, 1] = w_pol_costs_std
         pun_costs[i, j, 0] = w_pun_costs_mean
-        pun_costs[i, j, 1] = w_pol_costs_std
+        pun_costs[i, j, 1] = w_pun_costs_std
 
-    # Dump all results to file.
-    resultsdir = osp.join('..', 'results', f'sweep_N{N}_R{R}_{pi}_S{seed}')
+    # Dump all results to file
+    resultsdir = osp.join('..', 'results', f'BO_sweep_N{N}_R{R}_{pi}_S{seed}')
     dump_np(osp.join(resultsdir, 'deltas.npy'), deltas)
     dump_np(osp.join(resultsdir, 'betas.npy'), betas)
     dump_np(osp.join(resultsdir, 'params.npy'), params)
+    dump_np(osp.join(resultsdir, 'costs.npy'), costs)
     dump_np(osp.join(resultsdir, 'pol_costs.npy'), pol_costs)
     dump_np(osp.join(resultsdir, 'pun_costs.npy'), pun_costs)
 
 
-def plot_trial(taus, psis, nus, pol_costs, pun_costs, alpha, pi, delta, beta,
-               title=False):
+def plot_sweep(N, R, pi, alpha, seed):
     """
-    Plot the evolution of authority costs & parameters in a single RMHC trial.
-
-    :param taus: a 1xR array of the authority's tolerance values
-    :param psis: a 1xR array of the authority's severity values
-    :param nus: a 1xR array of the authority's surveillance values
-    :param pol_costs: a 1xR array of the authority's political costs
-    :param pun_costs: a 1xR array of the authority's punishment costs
-    :param alpha: the authority's float adamancy (> 0)
-    :param pi: 'uniform' or 'proportional' punishment
-    :param delta: the float mean population desired dissent (> 0)
-    :param beta: the float mean population boldness (> 0)
-    :param title: True iff the plot should have a title detailing parameters
-    """
-    fig, ax = plt.subplots(2, 1, figsize=(5, 4), sharex=True, dpi=300,
-                           layout='constrained')
-    R = len(taus)
-
-    # Plot costs (negative utility) over time.
-    ax[0].plot(np.arange(R), alpha * pol_costs, label='Political Cost',
-               c=cm.vikO(0.3))
-    ax[0].plot(np.arange(R), pun_costs, label='Punishment Cost',
-               c=cm.vikO(0.7))
-    ax[0].plot(np.arange(R), alpha * pol_costs + pun_costs, label='Total Cost',
-               c=cm.vikO(0))
-    ax[0].legend(loc='best', fontsize='small')
-    ax[0].set(ylabel='Costs')
-    if title:
-        ax[0].set_title(r"Hill Climbing Authority ($\pi$ " f"={pi}, "
-                        r"$\alpha$ " f"= {alpha}) vs. Population "
-                        r"$\delta_i \sim$" f"Exp({delta}), " r" $\beta_i \sim$"
-                        f"Exp({beta}" r"$^{-1}$")
-
-    # Plot parameters over time.
-    ax[1].plot(np.arange(R), taus, label=r'Tolerance $\tau_r$',
-               c=plt.cm.Blues(0.9))
-    ax[1].plot(np.arange(R), psis, label=r'Severity $\psi_r$',
-               c=plt.cm.Reds(0.8))
-    ax[1].plot(np.arange(R), nus, label=r'Surveillance $\nu_r$',
-               c=plt.cm.Greens(0.7))
-    ax[1].legend(loc='best', fontsize='small')
-    ax[1].set(xlim=[0, R], xlabel=r'Round $r$', ylabel='Parameter Value')
-
-    fig.savefig(osp.join('..', 'figs', 'rmhc_trial.pdf'))
-
-
-def plot_sweep(N, R, pi, alpha, eps, seed):
-    """
-    Plots the results of an RMHC sweep experiment showing the authority's
-    final average parameter values and costs per (mean desired dissent, mean
-    boldness) pair.
-
     :param N: an int number of individuals in the population
     :param R: an int number of rounds to simulate
     :param pi: 'uniform' or 'proportional' punishment
@@ -324,9 +253,10 @@ def plot_sweep(N, R, pi, alpha, eps, seed):
     :param seed: an int seed for random number generation
     """
     # Load results means from file.
-    resultsdir = osp.join('..', 'results', f'sweep_N{N}_R{R}_{pi}_S{seed}')
+    resultsdir = osp.join('..', 'results', f'BO_sweep_N{N}_R{R}_{pi}_S{seed}')
     deltas = load_np(osp.join(resultsdir, 'deltas.npy'))
     betas = load_np(osp.join(resultsdir, 'betas.npy'))
+
     params = load_np(osp.join(resultsdir, 'params.npy'))[:, :, 0]
     pol_costs = alpha * load_np(osp.join(resultsdir, 'pol_costs.npy'))[:, :, 0]
     pun_costs = load_np(osp.join(resultsdir, 'pun_costs.npy'))[:, :, 0]
@@ -340,8 +270,11 @@ def plot_sweep(N, R, pi, alpha, eps, seed):
                for i in product(range(2), range(3))]
 
     # Plot average final parameter values and final costs.
-    data = [pol_costs[:, :, -1], pun_costs[:, :, -1], total_costs[:, :, -1],
-            params[:, :, 0, -1], params[:, :, 1, -1], params[:, :, 2, -1]]
+    data = [pol_costs, pun_costs, total_costs,
+            params[:, :, 0], # tau
+            params[:, :, 1], # psi
+            params[:, :, 2]] # nu
+    
     lims = [(0, None), (0, None), (0, None), (0, 1), (0, None), (0, 1)]
     cmaps = [cm.devon_r, cm.bilbao_r, cm.batlowW_r, 'Blues', 'Reds', 'Greens']
     lbls = ['(A) Political Cost', '(B) Punishment Cost', '(C) Total Cost',
@@ -362,65 +295,7 @@ def plot_sweep(N, R, pi, alpha, eps, seed):
         else:
             axi.tick_params(labelleft=False)
 
-    fig.savefig(osp.join('..', 'figs', f'sweep_N{N}_R{R}_{pi}_S{seed}.png'))
-
-
-def plot_suppression_times(N, R, pi, alpha, seed, window=500, threshold=0.25,
-                           xmax=None):
-    """
-    Plots the authority's times to suppression as a function of boldness.
-
-    :param N: an int number of individuals in the population
-    :param R: an int number of rounds to simulate
-    :param pi: 'uniform' or 'proportional' punishment
-    :param alpha: the authority's float adamancy (> 0)
-    :param seed: an int seed for random number generation
-    :param window: an int sliding window size for measuring suppression
-    :param threshold: a fraction of political cost below which is suppression
-    :param xmax: a maximum value for the x-axis, or None if inferred
-    """
-    # Load results means from file.
-    resultsdir = osp.join('..', 'results', f'sweep_N{N}_R{R}_{pi}_S{seed}')
-    deltas = load_np(osp.join(resultsdir, 'deltas.npy'))
-    betas = load_np(osp.join(resultsdir, 'betas.npy'))
-    pol_costs = alpha * load_np(osp.join(resultsdir, 'pol_costs.npy'))[:, :, 0]
-
-    # Compute suppression times for total costs.
-    rep_times = np.zeros(pol_costs.shape[0:2], dtype=int)
-    for idx in tqdm(list(np.ndindex(rep_times.shape))):
-        max_cost = texponential(np.random.default_rng(seed), bound=1,
-                                scale=deltas[idx[0]], size=N).sum()
-        step = window
-        while step <= len(pol_costs[idx]):
-            if pol_costs[idx][step-window:step].mean() < threshold * max_cost:
-                break
-            else:
-                step += 1
-        rep_times[idx] = step
-
-    # Plot the figure.
-    fig, ax = plt.subplots(figsize=(6, 4), dpi=300, facecolor='w',
-                           layout='tight')
-    colors = [cm.lipari(i) for i in np.linspace(0, 1, len(deltas))]
-    for i, delta in enumerate(deltas):
-        if i in [0, 1, 2, len(deltas) - 3, len(deltas) - 2, len(deltas) - 1]:
-            ax.plot(betas, rep_times[i, :], color=colors[i],
-                    label=r'$\delta$ = ' + f'{delta:.3f}')
-        elif i == 3:
-            ax.plot(betas, rep_times[i, :], color=colors[i],
-                    label=r'$\delta$ = ...')
-        else:
-            ax.plot(betas, rep_times[i, :], color=colors[i])
-
-    if xmax is None:
-        xmax = betas.max()
-    ax.set(xlabel=r'Mean Boldness $\beta$',
-           ylabel='Time to Suppression (Rounds)',
-           xlim=[0, xmax], ylim=[0, None])
-    ax.legend()
-
-    fig.savefig(osp.join('..', 'figs',
-                         f'suppression_times_N{N}_R{R}_{pi}_S{seed}.pdf'))
+    fig.savefig(osp.join('..', 'figs', f'BO_sweep_N{N}_R{R}_{pi}_S{seed}.png'))
 
 
 if __name__ == "__main__":
@@ -433,7 +308,7 @@ if __name__ == "__main__":
                               '--granularity, --trials, --threads)'))
     parser.add_argument('-N', '--num_ind', type=int, default=100000,
                         help='Number of individuals in the population')
-    parser.add_argument('-R', '--rounds', type=int, default=10000,
+    parser.add_argument('-R', '--n_calls', type=int, default=100,
                         help='Number of rounds to simulate in a single trial')
     parser.add_argument('-D', '--delta', type=float, default=0.25,
                         help='Mean population desired dissent > 0')
@@ -441,21 +316,13 @@ if __name__ == "__main__":
                         help='Mean population boldness > 0')
     parser.add_argument('-P', '--pi', choices=['uniform', 'proportional'],
                         default='uniform', help='Punishment function')
-    parser.add_argument('-T', '--tau', type=float, default=0.25,
-                        help='Authority\'s initial tolerance in [0,1]')
-    parser.add_argument('-S', '--psi', type=float, default=0.1,
-                        help='Authority\'s initial severity > 0')
-    parser.add_argument('-V', '--nu', type=float, default=0.1,
-                        help='Authority\'s initial surveillance in [0,1]')
     parser.add_argument('-A', '--alpha', type=float, default=1.0,
                         help='Authority\'s adamancy > 0')
-    parser.add_argument('-E', '--epsilon', type=float, default=0.05,
-                        help='Window radius for authority parameter updates')
     parser.add_argument('--seed', type=int, default=None,
                         help='Seed for random number generation')
     parser.add_argument('--granularity', type=int, default=50,
                         help='Number of parameter values to sweep over')
-    parser.add_argument('--trials', type=int, default=50,
+    parser.add_argument('--trials', type=int, default=10,
                         help='Number of trials to run per parameter setting')
     parser.add_argument('--threads', type=int, default=1,
                         help='Number of threads to parallelize over')
@@ -464,19 +331,35 @@ if __name__ == "__main__":
     # Run a single trial or sweep experiment.
     rng = np.random.default_rng(args.seed)
     if args.sweep:
-        rmhc_sweep(N=args.num_ind, R=args.rounds, pi=args.pi, alpha=args.alpha,
-                   eps=args.epsilon, seed=args.seed,
-                   granularity=args.granularity, trials=args.trials,
-                   threads=args.threads)
-        plot_sweep(N=args.num_ind, R=args.rounds, pi=args.pi, alpha=args.alpha,
-                   eps=args.epsilon, seed=args.seed)
-        plot_suppression_times(N=args.num_ind, R=args.rounds, pi=args.pi,
-                               alpha=args.alpha, seed=args.seed)
+        bo_sweep(N=args.num_ind, R=args.n_calls, pi=args.pi, alpha=args.alpha,
+                 seed=args.seed, granularity=args.granularity, 
+                 trials=args.trials, threads=args.threads)
+        plot_sweep(N=args.num_ind, R=args.n_calls, pi=args.pi, alpha=args.alpha, seed=args.seed)
+        
     else:
-        (taus, psis, nus), pol_costs, pun_costs, deltas, betas = \
-            rmhc_trial(N=args.num_ind, R=args.rounds, delta=args.delta,
-                       beta=args.beta, pi=args.pi, tau0=args.tau,
-                       psi0=args.psi, nu0=args.nu, alpha=args.alpha,
-                       eps=args.epsilon, seed=args.seed)
-        plot_trial(taus, psis, nus, pol_costs, pun_costs, args.alpha, args.pi,
-                   args.delta, args.beta)
+        (best_total_cost, best_pol_cost, best_pun_cost, best_params, res) = \
+            run_bayesian_optimization(
+                N=args.num_ind, R=args.n_calls, delta=args.delta,
+                beta=args.beta, pi=args.pi, alpha=args.alpha,
+                seed=args.seed
+            )
+        
+        print(f"Lowest Total Cost: {best_total_cost:.4f}")
+        print(f"  Political Cost (raw): {best_pol_cost:.4f}")
+        print(f"  Punishment Cost: {best_pun_cost:.4f}")
+        print(f"  Optimal tau: {best_params[0]:.4f}")
+        print(f"  Optimal psi: {best_params[1]:.4f}")
+        print(f"  Optimal nu: {best_params[2]:.4f}")
+        
+        # This plots the "Best cost so far" vs. "Number of calls"
+        plot_convergence(res)
+        
+        # This plots all the points the optimizer tried
+        plot_evaluations(res, dimensions=['tau', 'psi', 'nu'])
+        
+        # This shows the optimizer's "Best Guess Map"
+        plot_objective(res, dimensions=['tau', 'psi', 'nu'])
+        
+        # This makes the plots appear on your screen
+        plt.show()
+    
