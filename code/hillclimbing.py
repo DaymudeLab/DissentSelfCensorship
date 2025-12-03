@@ -92,7 +92,7 @@ def run_bayesian_optimization(N, R, delta, beta, pi, alpha, seed):
 
     dimensions = [
         Real(0.0, 1.0, name='tau'),
-        Real(1e-9, 20.0, name='psi'), # Using 20 as upper bound for now
+        Real(1e-9, 500.0, name='psi'), # Using 20 as upper bound for now
         Real(0.0, 1.0, name='nu')
     ]
 
