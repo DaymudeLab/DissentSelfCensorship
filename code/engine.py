@@ -33,6 +33,28 @@ def b2sim(G, deltas, acts, shape=1):
     new_betas = np.minimum(np.maximum(new_betas, 1e-6), 1 - 1e-6)
     return shape * (1 / new_betas - 1)
 
+def d2sim(G, deltas, acts, shape=1):
+    """
+    Paper-style similarity boldness update (d2sim):
+
+        beta_{i,r+1} = shape * ( 1 / ( (1/|N(i)|) * sum_{j in N(i)} 1/|delta_i - a_{j,r}| ) - 1 )
+
+    Implementation matches the style of b2sim/b2a:
+      - compute a per-node value in (0,1)
+      - clamp to [1e-6, 1-1e-6]
+      - return shape * (1/value - 1)
+    """
+    new_betas = np.zeros(len(deltas))
+    for i in range(len(deltas)):
+        # distances to neighbors' actions
+        d = np.abs(deltas[i] - acts[G[i]])
+        d = np.maximum(d, 1e-6)               # avoid division by zero
+
+        avg_inv = np.mean(1.0 / d)            # mean of inverse distances (paper version)
+        new_betas[i] = 1.0 / avg_inv          # this is in (0,1] because avg_inv >= 1 for d in (0,1]
+
+    new_betas = np.minimum(np.maximum(new_betas, 1e-6), 1 - 1e-6)
+    return shape * (1 / new_betas - 1)
 
 def b2a(G, acts, shape=1):
     """
@@ -51,6 +73,21 @@ def b2a(G, acts, shape=1):
     new_betas = np.minimum(np.maximum(new_betas, 1e-6), 1 - 1e-6)
     return shape * (1 / new_betas - 1)
 
+def d2max(G, acts, shape=1):
+    """
+    Paper-style max-neighbor-action boldness update (d2max):
+
+        beta_{i,r+1} = shape * ( 1 / (1 - max_{j in N(i)} a_{j,r}) - 1 )
+
+    This is algebraically the same form as b2a; we keep it for naming consistency
+    with the report/PDF.
+    """
+    new_betas = np.zeros(len(acts))
+    for i in range(len(acts)):
+        new_betas[i] = 1 - np.max(acts[G[i]])  # (1 - max action)
+
+    new_betas = np.minimum(np.maximum(new_betas, 1e-6), 1 - 1e-6)
+    return shape * (1 / new_betas - 1)
 
 def d2d(G, deltas, w=0.5):
     """
@@ -106,7 +143,23 @@ def a2a(G, opt_acts, acts, w=0.5):
         new_acts[i] = w * opt_acts[i] + (1 - w) * np.mean(acts[G[i]])
 
     return new_acts
+    
+def b2b(G, betas, w=1.0):
+    """
+    Averaging for boldness (beta):
+        beta_{i,r+1} = (w * beta_{i,r} + sum_{j in N(i)} beta_{j,r}) / (w + |N(i)|)
 
+    This is the boldness analogue of d2d_S15: boldness diffuses through the network.
+    """
+    new_betas = np.zeros(len(betas))
+    for i in range(len(betas)):
+        nbrs = list(G[i])
+        deg = len(nbrs)
+        if deg == 0:
+            new_betas[i] = betas[i]
+            continue
+        new_betas[i] = (w * betas[i] + np.sum(betas[nbrs])) / (w + deg)
+    return new_betas
 
 ############################## SIMULATION ENGINE ##############################
 
@@ -139,7 +192,7 @@ def engine(G, N=100, R=100, rule='d2d', w=0.5, deltas=np.linspace(0, 1, 100),
     :returns: an Nx(R+1) array of boldness histories
     :returns: an NxR array of action histories
     """
-    assert rule in ['b2sim', 'b2a', 'd2d', 'd2a', 'a2a'], f'ERROR: Unrecognized rule \"{rule}\"'
+    assert rule in ['b2sim', 'b2a', 'd2d', 'd2a', 'a2a','d2sim','d2max','b2b'], f'ERROR: Unrecognized rule \"{rule}\"'
 
     # Set up arrays to record desired dissent, boldness, and action histories.
     delta_hist = np.zeros((N, R+1))
@@ -167,12 +220,18 @@ def engine(G, N=100, R=100, rule='d2d', w=0.5, deltas=np.linspace(0, 1, 100),
         # Apply the specified adaptation rule.
         if rule == 'b2sim':  # "solidarity", adapt boldness to similarity
             betas = b2sim(G, deltas, acts, shape=w)
+        elif rule == 'd2sim':  # paper: mean of inverse distance
+            betas = d2sim(G, deltas, acts, shape=w)
         elif rule == 'b2a':  # "solidarity", adapt boldness to actions
             betas = b2a(G, acts, shape=w)
+        elif rule == 'd2max':  # paper name for max neighbor action
+            betas = d2max(G, acts, shape=w)
         elif rule == 'd2d':  # "sharing around tables", adapt desire to desires
             deltas = d2d(G, deltas, w)
         elif rule == 'd2a':  # "socialization", adapt desire to actions
             deltas = d2a(G, deltas, acts, w)
+        elif rule == 'b2b':  # boldness change based on others boldness
+            betas = b2b(G, betas, w)
         elif r > 0:  # "when in Rome", adapt optimal action to previous actions
             acts = a2a(G, acts, act_hist[:, r-1], w)
 

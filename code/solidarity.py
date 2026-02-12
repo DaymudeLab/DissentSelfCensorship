@@ -36,7 +36,7 @@ if __name__ == '__main__':
 
     # Run simulation.
     deltas, betas, acts = engine(
-        G, N=N, R=R, rule='b2a', w=1, deltas=deltas, betas=betas, nu=0.5,
+        G, N=N, R=R, rule='b2b', w=1, deltas=deltas, betas=betas, nu=0.5,
         pi='uniform', tau=0.1, sigma_tau=0.0, psi=1, sigma_psi=0.0, rng=rng)
 
     # Plot the network.
