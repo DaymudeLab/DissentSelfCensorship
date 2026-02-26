@@ -197,7 +197,6 @@ def sweep_WS_p(outdir="figs_final",
     print("Saved:", outpath)
 
 
-# Optional: BA m sweep (Figure 2C)
 def sweep_BA_m(outdir="figs_final",
                n=500, R=50, runs=10,
                NA_frac=0.035,
@@ -236,6 +235,5 @@ if __name__ == "__main__":
                [0.01, 0.05]]
     )
 
-    # Uncomment if you also want Figure 2B / 2C:
 sweep_WS_p(outdir="figs_final", n=500, R=50, runs=10, NA_frac=0.035, ws_k=6)
 sweep_BA_m(outdir="figs_final", n=500, R=50, runs=10, NA_frac=0.035)
