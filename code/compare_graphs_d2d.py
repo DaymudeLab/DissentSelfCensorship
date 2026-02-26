@@ -165,11 +165,8 @@ def sweep_NA_three_models(outdir="figs_final",
     plt.savefig(outpath, bbox_inches="tight")
     plt.close()
 
-    print("Saved:", outpath)
     return results
 
-
-# Optional: WS p sweep (Figure 2B)
 def sweep_WS_p(outdir="figs_final",
                n=500, R=50, runs=10,
                NA_frac=0.035,
@@ -224,7 +221,7 @@ def sweep_BA_m(outdir="figs_final",
 
 
 if __name__ == "__main__":
-    # Main deliverable: Figure 2A (final vs N_A with three models)
+    # (final vs N_A with three models)
     sweep_NA_three_models(
         outdir="figs_final",
         n=500, R=50, runs=10,
