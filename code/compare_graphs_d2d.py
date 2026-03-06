@@ -225,7 +225,7 @@ if __name__ == "__main__":
     sweep_NA_three_models(
         outdir="figs_final",
         n=500, R=50, runs=10,
-        NA_fracs=np.linspace(0.01, 0.15, 10),
+        NA_fracs=np.linspace(0.01, 0.50, 10),
         ws_k=6, ws_p=0.10,
         ba_m=2,
         sbm_P=[[0.15, 0.01],
