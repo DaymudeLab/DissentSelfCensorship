@@ -174,7 +174,7 @@ def sweep_WS_p(outdir="figs_final",
                ps=None):
     os.makedirs(outdir, exist_ok=True)
     if ps is None:
-        ps = [0.0, 0.01, 0.05, 0.1, 0.5, 1.0]
+        ps = np.linspace(0, 1, 11)
 
     means, stds = [], []
     for p in ps:
@@ -225,7 +225,7 @@ if __name__ == "__main__":
     sweep_NA_three_models(
         outdir="figs_final",
         n=500, R=50, runs=10,
-        NA_fracs=np.linspace(0.01, 0.50, 10),
+        NA_fracs=np.linspace(0.01, 1, 10),
         ws_k=6, ws_p=0.10,
         ba_m=2,
         sbm_P=[[0.15, 0.01],
