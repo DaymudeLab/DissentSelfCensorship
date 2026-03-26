@@ -63,7 +63,7 @@ def texponential(rng, bound, scale, size):
     return samples[:size]
 
 
-def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate=1, pair='random', k3_method='sphere'):
+def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate=1, pair='random', k3_method='sphere', C=0.0):
     """
     Runs a single simulation trial of the model where individuals' desired
     dissents and boldness constants are exponentially-distributed but fixed and
@@ -209,12 +209,57 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate
         if r > 0 and alpha * pol_costs[r] + pun_costs[r] > \
                 alpha * pol_costs[r-1] + pun_costs[r-1]:
             params[:, r] = params[:, r-1]
+
+        #Now the people who were punished or not punished will change their desires
+        #cond (boolean array) is the people who were observed acting above tolerance
+        if C>0:
+            deltas = np.where(cond,
+                            np.minimum(1,deltas + C), #everyone who was punished 
+                            np.maximum(0,deltas-C) #everyone not punished, we would habe to change this if C was proportional to pi
+            )
             
     #after getting all params, plot!
     #_plot_candidates_2d(cands_history)
 
     return params, pol_costs, pun_costs, deltas, betas
+
+def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed):
+    """
+    Evaluates C vs Cost with only 1 trial per C
+    Restricted to k=1 sphere metho
+    """
+    C_values = np.linspace(0,1,11) #11 divs between 0 and 1
+    k_values = [1, 3]
+
+    fig, ax = plt.subplots(figsize=(7, 5), dpi=300, facecolor='w')
+    colors = [cm.batlow(0.2), cm.batlow(0.8)] # Adjusted to just two distinct colors
     
+    for idx, k in enumerate(k_values):
+        final_costs = []
+        for C in C_values:
+            # Explicitly pass k3_method='sphere' to ensure the correct mutation logic
+            _, pol_costs, pun_costs, _, _ = rmhc_trial(
+                N, R, delta, beta, pi, tau0, psi0, nu0, alpha, 
+                eps, seed, k_mutate=k, k3_method='sphere', C=C
+            )
+            final_costs.append(alpha * pol_costs[-1] + pun_costs[-1])
+            
+        # Make the legend labels descriptive
+        label = 'Single Param (k=1)' if k == 1 else 'Multi Param Sphere (k=3)'
+        ax.plot(C_values, final_costs, label=label, color=colors[idx], marker='o', markersize=4)
+
+    ax.set_xlabel('Constant C (Change in Desire)')
+    ax.set_ylabel('Final Total Cost')
+    ax.set_title('Single vs Multi Param RMHC (Sphere): C vs Cost')
+    ax.set_xlim([0, 1])
+    ax.set_ylim(bottom=0)
+    ax.legend()
+    plt.grid(True, linestyle='--', alpha=0.7)
+    
+    plt.tight_layout()
+    fig.savefig(osp.join('..', 'figs', 'fast_c_vs_cost_k1_k3sphere.pdf'))
+    plt.show()
+
 #visualize params
 def _plot_candidates_2d(cands_history, plane='tau-psi', every=1):
     """
@@ -573,13 +618,22 @@ if __name__ == "__main__":
                     help='If set, run trials for k=1,2,3 sequentially.')
     parser.add_argument('--k3-method', type=str, choices=['box', 'sphere'], default='sphere',
                     help='When k=3: mutation method (box or sphere).')
+    
+
+    parser.add_argument('--fast-c', action='store_true',
+                        help='Run the fast 1-pass C vs Cost plot')
 
     
     args = parser.parse_args()
 
     # Run a single trial or sweep experiment.
     rng = np.random.default_rng(args.seed)
-    if args.sweep:
+    if args.fast_c:
+        plot_fast_c_vs_cost(N=args.num_ind, R=args.rounds, delta=args.delta,
+                            beta=args.beta, pi=args.pi, tau0=args.tau,
+                            psi0=args.psi, nu0=args.nu, alpha=args.alpha,
+                            eps=args.epsilon, seed=args.seed)
+    elif args.sweep:
         rmhc_sweep(N=args.num_ind, R=args.rounds, pi=args.pi, alpha=args.alpha,
                    eps=args.epsilon, seed=args.seed,
                    granularity=args.granularity, trials=args.trials,
