@@ -215,7 +215,7 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate
         if C>0:
             deltas = np.where(cond,
                             np.minimum(1,deltas + C), #everyone who was punished 
-                            np.maximum(0,deltas-C) #everyone not punished, we would habe to change this if C was proportional to pi
+                            np.maximum(0,deltas - C) #everyone not punished, we would habe to change this if C was proportional to pi
             )
             
     #after getting all params, plot!
@@ -223,35 +223,62 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate
 
     return params, pol_costs, pun_costs, deltas, betas
 
-def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed):
+def fast_c_worker(k, C, N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed, trials=5):
+    """Worker function to run multiple C vs Cost trials and average them."""
+    final_costs = []
+    
+    for t in range(trials):
+        # Give each trial a unique seed
+        trial_seed = seed + t if seed is not None else None
+        
+        _, pol_costs, pun_costs, _, _ = rmhc_trial(
+            N, R, delta, beta, pi, tau0, psi0, nu0, alpha, 
+            eps, trial_seed, k_mutate=k, k3_method='sphere', C=C
+        )
+        final_costs.append(alpha * pol_costs[-1] + pun_costs[-1])
+        
+    # Return the average final cost across the trials
+    return k, C, np.mean(final_costs)
+
+def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed, threads):
     """
     Evaluates C vs Cost with only 1 trial per C
     Restricted to k=1 sphere metho
     """
-    C_values = np.linspace(0,1,11) #11 divs between 0 and 1
+    C_values = np.linspace(0,0.01,31)
     k_values = [1, 3]
+
+    #using threads to speed up
+    tasks = list(product(k_values, C_values))
+    ks = [t[0] for t in tasks]
+    Cs = [t[1] for t in tasks]
+
+    trials_run = 5
+
+    results = process_map(
+        fast_c_worker, ks, Cs,
+        repeat(N), repeat(R), repeat(delta), repeat(beta), repeat(pi),
+        repeat(tau0), repeat(psi0), repeat(nu0), repeat(alpha), repeat(eps), repeat(seed), repeat(trials_run),
+        max_workers=threads, chunksize=1, desc="Running Fast C Pass"
+    )
+
+    # Organize the results back into lists for plotting
+    cost_dict = {1: [], 3: []}
+    for k_val in k_values:
+        cost_dict[k_val] = [res[2] for res in results if res[0] == k_val]
 
     fig, ax = plt.subplots(figsize=(7, 5), dpi=300, facecolor='w')
     colors = [cm.batlow(0.2), cm.batlow(0.8)] # Adjusted to just two distinct colors
     
     for idx, k in enumerate(k_values):
-        final_costs = []
-        for C in C_values:
-            # Explicitly pass k3_method='sphere' to ensure the correct mutation logic
-            _, pol_costs, pun_costs, _, _ = rmhc_trial(
-                N, R, delta, beta, pi, tau0, psi0, nu0, alpha, 
-                eps, seed, k_mutate=k, k3_method='sphere', C=C
-            )
-            final_costs.append(alpha * pol_costs[-1] + pun_costs[-1])
-            
         # Make the legend labels descriptive
         label = 'Single Param (k=1)' if k == 1 else 'Multi Param Sphere (k=3)'
-        ax.plot(C_values, final_costs, label=label, color=colors[idx], marker='o', markersize=4)
+        ax.plot(C_values, cost_dict[k], label=label, color=colors[idx], marker='o', markersize=4)
 
     ax.set_xlabel('Constant C (Change in Desire)')
     ax.set_ylabel('Final Total Cost')
     ax.set_title('Single vs Multi Param RMHC (Sphere): C vs Cost')
-    ax.set_xlim([0, 1])
+    ax.set_xlim([0, max(C_values)])
     ax.set_ylim(bottom=0)
     ax.legend()
     plt.grid(True, linestyle='--', alpha=0.7)
@@ -632,7 +659,7 @@ if __name__ == "__main__":
         plot_fast_c_vs_cost(N=args.num_ind, R=args.rounds, delta=args.delta,
                             beta=args.beta, pi=args.pi, tau0=args.tau,
                             psi0=args.psi, nu0=args.nu, alpha=args.alpha,
-                            eps=args.epsilon, seed=args.seed)
+                            eps=args.epsilon, seed=args.seed,threads=args.threads)
     elif args.sweep:
         rmhc_sweep(N=args.num_ind, R=args.rounds, pi=args.pi, alpha=args.alpha,
                    eps=args.epsilon, seed=args.seed,
