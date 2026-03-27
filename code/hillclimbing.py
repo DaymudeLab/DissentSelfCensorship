@@ -287,38 +287,6 @@ def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed
     fig.savefig(osp.join('..', 'figs', 'fast_c_vs_cost_k1_k3sphere.pdf'))
     plt.show()
 
-#visualize params
-def _plot_candidates_2d(cands_history, plane='tau-psi', every=1):
-    """
-    ONly draw candidate params with 2D （project the param on the plane)
-    :param cands_history: list of 1x3 arrays in order [tau, psi, nu] for each round's candidate
-    :param plane: 'tau-psi' | 'tau-nu' | 'psi-nu'
-    :param every: int
-    """
-    if not cands_history:
-        return
-    C = np.asarray(cands_history)[::max(1, int(every))]
-    if plane == 'tau-psi':
-        x, y = C[:, 0], C[:, 1]; xlab, ylab = 'tau', 'psi'
-    elif plane == 'tau-nu':
-        x, y = C[:, 0], C[:, 2]; xlab, ylab = 'tau', 'nu'
-    else:  # 'psi-nu'
-        x, y = C[:, 1], C[:, 2]; xlab, ylab = 'psi', 'nu'
-
-    plt.figure(figsize=(6, 5))
-    plt.scatter(x, y, s=8, alpha=0.5)
-    plt.xlabel(xlab); plt.ylabel(ylab)
-    plt.title(f"Candidate parameters per round ({xlab} vs {ylab})")
-    
-    # visualized boundry（tau/nu ∈ [0,1]；psi ≥ 0）
-    if xlab in ('tau', 'nu'): plt.xlim(-0.02, 1.02)
-    if ylab in ('tau', 'nu'): plt.ylim(-0.02, 1.02)
-    if xlab == 'psi': plt.xlim(left=0)
-    if ylab == 'psi': plt.ylim(bottom=0)
-    plt.tight_layout()
-    plt.show()
-
-
 def sweep_worker(idx, db, N, R, pi, tau0s, psi0s, nu0s, alpha, eps, seeds, k_mutate, pair, k3_method):
     """
     Worker function handling the repeated RMHC trials for a single setting of
