@@ -134,7 +134,8 @@ def update_population_personal_social(deltas, betas, acts, C, boldness_pct,
     return new_deltas, np.maximum(1e-9, new_betas)
 
 
-def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate=1, pair='random', k3_method='sphere', C=0.0):
+def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,
+               k_mutate=1, k3_method='sphere', C=0.0):
     """
     Runs a single simulation trial of the model where individuals' desired
     dissents and boldness constants are exponentially-distributed but fixed and
@@ -200,9 +201,8 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate
         
             #choose how many params gonna changeeeee
 
-            # --k-mutate [1,2,3]: Sets whether to mutate 1, 2, or all 3 parameters at each step.
-
-            # --pair [tp,tn,pn]: For k=2, specifies which parameter pair to mutate (t=tolerance, p=psi, n=nu).
+            # --k-mutate [1,3]: Sets whether to mutate 1 or all 3 parameters
+            # at each step.
 
             # --k3-method [box,sphere]: For k=3, sets the mutation method to sample from a cube (box) or a sphere.
             
@@ -213,19 +213,6 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate
                 high = min(bounds[idx, 1], candidate_params[idx] + eps)
                 candidate_params[idx] = rng.uniform(low, high)
 
-            elif k_mutate == 2:
-                if pair == 'random':
-                    idx_pair = rng.choice(3, size=2, replace=False)
-                else:
-                    pair_map = {'tp': [0,1], 'tn': [0,2], 'pn': [1,2]}
-                    # 0:tau,1:psi,2:nu
-                    idx_pair = pair_map[pair]
-
-                for p in idx_pair:
-                    low  = max(bounds[p, 0], candidate_params[p] - eps)
-                    high = min(bounds[p, 1], candidate_params[p] + eps)
-                    candidate_params[p] = rng.uniform(low, high)
-            # k_mutate == 3
             else:
             # Mutate all three parameters
                 if k3_method == 'box':
@@ -295,7 +282,7 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate
     return params, pol_costs, pun_costs, deltas, betas
 
 def feedback_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,
-                   k_mutate, pair, k3_method, C, boldness_pct,
+                   k_mutate, k3_method, C, boldness_pct,
                    scenario='personal', social_degree=4):
     """
     Fast-plot-specific coupled simulation that keeps the RMHC authority update
@@ -321,17 +308,6 @@ def feedback_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,
                 low = max(bounds[idx, 0], candidate_params[idx] - eps)
                 high = min(bounds[idx, 1], candidate_params[idx] + eps)
                 candidate_params[idx] = rng.uniform(low, high)
-            elif k_mutate == 2:
-                if pair == 'random':
-                    idx_pair = rng.choice(3, size=2, replace=False)
-                else:
-                    pair_map = {'tp': [0, 1], 'tn': [0, 2], 'pn': [1, 2]}
-                    idx_pair = pair_map[pair]
-
-                for p in idx_pair:
-                    low = max(bounds[p, 0], candidate_params[p] - eps)
-                    high = min(bounds[p, 1], candidate_params[p] + eps)
-                    candidate_params[p] = rng.uniform(low, high)
             else:
                 if k3_method == 'box':
                     for p in range(3):
@@ -398,7 +374,7 @@ def fast_c_worker(scenario, k, C, boldness_pct, N, R, delta, beta, pi, tau0,
         trial_seed = seed + t if seed is not None else None
         _, pol_costs, pun_costs, trial_deltas, trial_betas = feedback_trial(
             N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, trial_seed,
-            k_mutate=k, pair='random', k3_method='sphere', C=C,
+            k_mutate=k, k3_method='sphere', C=C,
             boldness_pct=boldness_pct, scenario=scenario,
             social_degree=social_degree
         )
@@ -441,8 +417,6 @@ def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps,
         max_workers=threads, chunksize=1, desc="Running Fast C Comparison"
     )
 
-    fig, axes = plt.subplots(3, 2, figsize=(12, 10), sharex=True, dpi=300,
-                             facecolor='w')
     pct_colors = {
         pct: cm.batlow(x) for pct, x in zip(
             feedback_pcts, np.linspace(0.2, 0.8, len(feedback_pcts))
@@ -455,10 +429,12 @@ def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps,
         ('Final Mean Boldness', 6),
     ]
 
-    for col, (scenario_key, scenario_label) in enumerate(scenarios):
+    for scenario_key, scenario_label in scenarios:
         scenario_results = [res for res in results if res[0] == scenario_key]
+        fig, axes = plt.subplots(3, 1, figsize=(7, 10), sharex=True, dpi=300,
+                                 facecolor='w')
         for row, (ylabel, idx) in enumerate(metric_map):
-            ax = axes[row, col]
+            ax = axes[row]
             for pct in feedback_pcts:
                 for k in k_values:
                     series = [res[idx] for res in scenario_results
@@ -470,8 +446,8 @@ def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps,
 
             if row == 0:
                 ax.set_title(scenario_label, weight='bold')
-            if col == 0:
-                ax.set_ylabel(ylabel)
+                ax.legend(frameon=False, ncol=2)
+            ax.set_ylabel(ylabel)
             if row == 2:
                 ax.set_xlabel('Constant C (Desire Update Size)')
             ax.grid(True, linestyle='--', alpha=0.7)
@@ -479,17 +455,14 @@ def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps,
                 ax.set_ylim(bottom=0)
             elif row == 1:
                 ax.set_ylim([0, 1])
+        plt.tight_layout()
+        filename = 'fast_c_personal_only.pdf' if scenario_key == 'personal' \
+            else 'fast_c_personal_plus_social.pdf'
+        fig.savefig(osp.join('..', 'figs', filename))
+        plt.show()
 
-    handles, labels = axes[0, 0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc='upper center', ncol=4, frameon=False)
-    fig.suptitle('RMHC with Personal vs Personal+Social Population Updates',
-                 y=0.98)
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
-    fig.savefig(osp.join('..', 'figs',
-                         'fast_c_personal_vs_social_compare.pdf'))
-    plt.show()
-
-def sweep_worker(idx, db, N, R, pi, tau0s, psi0s, nu0s, alpha, eps, seeds, k_mutate, pair, k3_method):
+def sweep_worker(idx, db, N, R, pi, tau0s, psi0s, nu0s, alpha, eps, seeds,
+                 k_mutate, k3_method):
     """
     Worker function handling the repeated RMHC trials for a single setting of
     (delta, beta).
@@ -528,7 +501,7 @@ def sweep_worker(idx, db, N, R, pi, tau0s, psi0s, nu0s, alpha, eps, seeds, k_mut
     for t in range(len(seeds)):
         w_params[t], w_pol_costs[t], w_pun_costs[t], _, _ = \
             rmhc_trial(N, R, delta, beta, pi, tau0s[t], psi0s[t], nu0s[t],
-                       alpha, eps, seeds[t], k_mutate, pair, k3_method)
+                       alpha, eps, seeds[t], k_mutate, k3_method)
 
     # Return the index + means/standard deviations across trials.
     return (idx, w_params.mean(axis=0), w_params.std(axis=0),
@@ -536,7 +509,8 @@ def sweep_worker(idx, db, N, R, pi, tau0s, psi0s, nu0s, alpha, eps, seeds, k_mut
             w_pun_costs.mean(axis=0), w_pun_costs.std(axis=0))
 
 
-def rmhc_sweep(N, R, pi, alpha, eps, seed, granularity, trials, threads, k_mutate, pair, k3_method):
+def rmhc_sweep(N, R, pi, alpha, eps, seed, granularity, trials, threads,
+               k_mutate, k3_method):
     """
     Varying the population's mean desired dissent and boldness as independent
     variables and randomly initializing the authority's parameters, measure the
@@ -578,7 +552,8 @@ def rmhc_sweep(N, R, pi, alpha, eps, seed, granularity, trials, threads, k_mutat
     dbs = list(product(deltas, betas))
     p = process_map(sweep_worker, idxs, dbs, repeat(N), repeat(R), repeat(pi),
                     repeat(tau0s), repeat(psi0s), repeat(nu0s), repeat(alpha),
-                    repeat(eps), repeat(seeds), repeat(k_mutate), repeat(pair), repeat(k3_method), max_workers=threads,
+                    repeat(eps), repeat(seeds), repeat(k_mutate),
+                    repeat(k3_method), max_workers=threads,
                     chunksize=1)
     for (i, j), w_params_mean, w_params_std, w_pol_costs_mean, \
             w_pol_costs_std, w_pun_costs_mean, w_pun_costs_std in p:
@@ -599,7 +574,7 @@ def rmhc_sweep(N, R, pi, alpha, eps, seed, granularity, trials, threads, k_mutat
 
 
 def plot_trial(taus, psis, nus, pol_costs, pun_costs, alpha, pi, delta, beta,
-               title=False, k_mutate=None, pair=None, k3_method=None):
+               title=False, k_mutate=None, k3_method=None):
     """
     Plot the evolution of authority costs & parameters in a single RMHC trial.
 
@@ -647,8 +622,6 @@ def plot_trial(taus, psis, nus, pol_costs, pun_costs, alpha, pi, delta, beta,
     suffix = ""
     if k_mutate is not None:
         suffix += f"_k{k_mutate}"
-    if pair is not None and k_mutate == 2:
-        suffix += f"_{pair}"
     if k3_method is not None and k_mutate == 3:
         suffix += f"_{k3_method}"
     fig.savefig(osp.join('..', 'figs', f'rmhc_trial{suffix}.pdf'))
@@ -805,11 +778,8 @@ if __name__ == "__main__":
                         help='Number of threads to parallelize over')
                         
     #k=1,k=2,k=3
-    parser.add_argument('--k-mutate', type=int, choices=[1,2,3], default=1,
-                    help='How many parameters to mutate per step (1, 2, or 3).')
-
-    parser.add_argument('--pair', type=str, choices=['random','tp','tn','pn'], default='random',
-                    help='When k=2: choose which two to mutate. tp=(tau,psi), tn=(tau,nu), pn=(psi,nu).')
+    parser.add_argument('--k-mutate', type=int, choices=[1,3], default=1,
+                    help='How many parameters to mutate per step (1 or 3).')
 
     parser.add_argument('--run-all-k', action='store_true',
                     help='If set, run trials for k=1,2,3 sequentially.')
@@ -845,7 +815,7 @@ if __name__ == "__main__":
                    eps=args.epsilon, seed=args.seed,
                    granularity=args.granularity, trials=args.trials,
                    threads=args.threads, k_mutate=args.k_mutate,
-           pair=args.pair, k3_method=args.k3_method)
+                   k3_method=args.k3_method)
         plot_sweep(N=args.num_ind, R=args.rounds, pi=args.pi, alpha=args.alpha,
                    eps=args.epsilon, seed=args.seed)
         plot_suppression_times(N=args.num_ind, R=args.rounds, pi=args.pi,
@@ -856,7 +826,7 @@ if __name__ == "__main__":
                        beta=args.beta, pi=args.pi, tau0=args.tau,
                        psi0=args.psi, nu0=args.nu, alpha=args.alpha,
                        eps=args.epsilon, seed=args.seed,
-                       k_mutate=args.k_mutate, pair=args.pair, k3_method=args.k3_method)
+                       k_mutate=args.k_mutate, k3_method=args.k3_method)
         plot_trial(taus, psis, nus, pol_costs, pun_costs, args.alpha, args.pi,
                    args.delta, args.beta, title=False,
-                   k_mutate=args.k_mutate, pair=args.pair, k3_method=args.k3_method)
+                   k_mutate=args.k_mutate, k3_method=args.k3_method)
