@@ -403,7 +403,7 @@ def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps,
 
     tasks = list(product([s[0] for s in scenarios], k_values, C_values,
                          feedback_pcts))
-    trials_run = 5
+    trials_run = 1
 
     results = process_map(
         fast_c_worker,
