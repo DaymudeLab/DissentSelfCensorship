@@ -63,6 +63,77 @@ def texponential(rng, bound, scale, size):
     return samples[:size]
 
 
+def self_censor_mask(acts, deltas, atol=1e-12, rtol=1e-9):
+    """
+    Identifies self-censorship while guarding against tiny floating-point
+    discrepancies between action and desired dissent.
+    """
+    return (acts < deltas) & np.logical_not(
+        np.isclose(acts, deltas, atol=atol, rtol=rtol)
+    )
+
+
+def ring_neighbors(N, degree=4):
+    """
+    Builds a simple undirected ring neighborhood structure for lightweight
+    social-update experiments without changing the RMHC machinery.
+    """
+    degree = max(0, min(degree, N - 1))
+    left = degree // 2
+    right = degree - left
+    neighbors = []
+    for i in range(N):
+        nbrs = [((i - j) % N) for j in range(1, left + 1)]
+        nbrs.extend(((i + j) % N) for j in range(1, right + 1))
+        neighbors.append(np.array(nbrs, dtype=int))
+    return neighbors
+
+
+def neighbor_average(values, neighbors):
+    """
+    Averages a node-level array over each node's neighborhood.
+    """
+    avgs = np.copy(values)
+    for i, nbrs in enumerate(neighbors):
+        if len(nbrs) > 0:
+            avgs[i] = values[nbrs].mean()
+    return avgs
+
+
+def update_population_personal(deltas, betas, acts, C, boldness_pct):
+    """
+    Personal update only: self-censorship raises desire and lowers boldness,
+    while not self-censoring lowers desire and raises boldness.
+    """
+    self_censored = self_censor_mask(acts, deltas)
+
+    new_deltas = np.where(
+        self_censored,
+        np.minimum(1, deltas + C),
+        np.maximum(0, deltas - C)
+    )
+    new_betas = np.where(
+        self_censored,
+        np.maximum(1e-9, betas * (1 - boldness_pct)),
+        np.maximum(1e-9, betas * (1 + boldness_pct))
+    )
+    return new_deltas, new_betas
+
+
+def update_population_personal_social(deltas, betas, acts, C, boldness_pct,
+                                      neighbors, social_weight):
+    """
+    Personal update plus a mild peer effect on boldness. After the personal
+    multiplicative update, boldness is nudged toward the neighborhood mean.
+    """
+    new_deltas, new_betas = update_population_personal(
+        deltas, betas, acts, C, boldness_pct
+    )
+    peer_betas = neighbor_average(new_betas, neighbors)
+    new_betas = (1 - social_weight) * new_betas + social_weight * peer_betas
+    return new_deltas, np.maximum(1e-9, new_betas)
+
+
 def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate=1, pair='random', k3_method='sphere', C=0.0):
     """
     Runs a single simulation trial of the model where individuals' desired
@@ -223,68 +294,199 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate
 
     return params, pol_costs, pun_costs, deltas, betas
 
-def fast_c_worker(k, C, N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed, trials=5):
-    """Worker function to run multiple C vs Cost trials and average them."""
+def feedback_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,
+                   k_mutate, pair, k3_method, C, boldness_pct,
+                   scenario='personal', social_degree=4):
+    """
+    Fast-plot-specific coupled simulation that keeps the RMHC authority update
+    structure intact while swapping in alternative population update rules.
+    """
+    rng = np.random.default_rng(seed)
+    deltas = texponential(rng, bound=1, scale=delta, size=N)
+    betas = rng.exponential(scale=beta, size=N)
+    bounds = np.array([[0, 1], [1e-9, np.inf], [0, 1]])
+    params = np.zeros((3, R))
+    pol_costs, pun_costs = np.zeros(R), np.zeros(R)
+    neighbors = ring_neighbors(N, degree=social_degree) \
+        if scenario == 'personal_social' else None
+
+    for r in range(R):
+        if r == 0:
+            params[:, r] = [tau0, psi0, nu0]
+        else:
+            candidate_params = np.copy(params[:, r-1])
+
+            if k_mutate == 1:
+                idx = rng.integers(3)
+                low = max(bounds[idx, 0], candidate_params[idx] - eps)
+                high = min(bounds[idx, 1], candidate_params[idx] + eps)
+                candidate_params[idx] = rng.uniform(low, high)
+            elif k_mutate == 2:
+                if pair == 'random':
+                    idx_pair = rng.choice(3, size=2, replace=False)
+                else:
+                    pair_map = {'tp': [0, 1], 'tn': [0, 2], 'pn': [1, 2]}
+                    idx_pair = pair_map[pair]
+
+                for p in idx_pair:
+                    low = max(bounds[p, 0], candidate_params[p] - eps)
+                    high = min(bounds[p, 1], candidate_params[p] + eps)
+                    candidate_params[p] = rng.uniform(low, high)
+            else:
+                if k3_method == 'box':
+                    for p in range(3):
+                        low = max(bounds[p, 0], candidate_params[p] - eps)
+                        high = min(bounds[p, 1], candidate_params[p] + eps)
+                        candidate_params[p] = rng.uniform(low, high)
+                elif k3_method == 'sphere':
+                    angle = rng.normal(size=3)
+                    angle /= np.linalg.norm(angle)
+                    candidate_params += angle * eps
+
+                candidate_params[0] = np.clip(
+                    candidate_params[0], bounds[0, 0], bounds[0, 1]
+                )
+                candidate_params[1] = max(candidate_params[1], bounds[1, 0])
+                candidate_params[2] = np.clip(
+                    candidate_params[2], bounds[2, 0], bounds[2, 1]
+                )
+
+            params[:, r] = candidate_params
+
+        tau, psi, nu = params[:, r]
+        acts = opt_actions(deltas, betas, nu, pi, tau, psi)
+        cond = (acts > tau) & (rng.random(N) < (nu + (1 - nu) * acts))
+        if pi == 'uniform':
+            punish = cond * psi
+        elif pi == 'proportional':
+            punish = cond * psi * (acts - tau)
+        else:
+            assert False, f'ERROR: Invalid punishment function \"{pi}\"'
+
+        pol_costs[r] = acts.sum()
+        pun_costs[r] = punish.sum()
+
+        if r > 0 and alpha * pol_costs[r] + pun_costs[r] > \
+                alpha * pol_costs[r-1] + pun_costs[r-1]:
+            params[:, r] = params[:, r-1]
+
+        if scenario == 'personal':
+            deltas, betas = update_population_personal(
+                deltas, betas, acts, C, boldness_pct
+            )
+        elif scenario == 'personal_social':
+            deltas, betas = update_population_personal_social(
+                deltas, betas, acts, C, boldness_pct, neighbors,
+                social_weight=boldness_pct
+            )
+        else:
+            assert False, f'ERROR: Invalid feedback scenario \"{scenario}\"'
+
+    return params, pol_costs, pun_costs, deltas, betas
+
+
+def fast_c_worker(scenario, k, C, boldness_pct, N, R, delta, beta, pi, tau0,
+                  psi0, nu0, alpha, eps, seed, social_degree, trials=5):
+    """
+    Worker function for fast comparison plots.
+    """
     final_costs = []
-    
+    final_deltas = []
+    final_betas = []
+
     for t in range(trials):
-        # Give each trial a unique seed
         trial_seed = seed + t if seed is not None else None
-        
-        _, pol_costs, pun_costs, _, _ = rmhc_trial(
-            N, R, delta, beta, pi, tau0, psi0, nu0, alpha, 
-            eps, trial_seed, k_mutate=k, k3_method='sphere', C=C
+        _, pol_costs, pun_costs, trial_deltas, trial_betas = feedback_trial(
+            N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, trial_seed,
+            k_mutate=k, pair='random', k3_method='sphere', C=C,
+            boldness_pct=boldness_pct, scenario=scenario,
+            social_degree=social_degree
         )
         final_costs.append(alpha * pol_costs[-1] + pun_costs[-1])
-        
-    # Return the average final cost across the trials
-    return k, C, np.mean(final_costs)
+        final_deltas.append(trial_deltas.mean())
+        final_betas.append(trial_betas.mean())
 
-def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed, threads):
+    return (scenario, k, C, boldness_pct, np.mean(final_costs),
+            np.mean(final_deltas), np.mean(final_betas))
+
+
+def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps,
+                        seed, threads, social_degree, feedback_pcts):
     """
-    Evaluates C vs Cost with only 1 trial per C
-    Restricted to k=1 sphere metho
+    Compares two population-feedback models while keeping the authority's RMHC
+    adaptation active:
+    1. personal self-censorship updates only
+    2. personal updates plus a mild social boldness update
     """
-    C_values = np.linspace(0,0.01,31)
+    C_values = np.linspace(0, 0.01, 31)
     k_values = [1, 3]
+    scenarios = [
+        ('personal', 'Personal Update Only'),
+        ('personal_social', 'Personal + Social Update'),
+    ]
 
-    #using threads to speed up
-    tasks = list(product(k_values, C_values))
-    ks = [t[0] for t in tasks]
-    Cs = [t[1] for t in tasks]
-
+    tasks = list(product([s[0] for s in scenarios], k_values, C_values,
+                         feedback_pcts))
     trials_run = 5
 
     results = process_map(
-        fast_c_worker, ks, Cs,
+        fast_c_worker,
+        [t[0] for t in tasks],
+        [t[1] for t in tasks],
+        [t[2] for t in tasks],
+        [t[3] for t in tasks],
         repeat(N), repeat(R), repeat(delta), repeat(beta), repeat(pi),
-        repeat(tau0), repeat(psi0), repeat(nu0), repeat(alpha), repeat(eps), repeat(seed), repeat(trials_run),
-        max_workers=threads, chunksize=1, desc="Running Fast C Pass"
+        repeat(tau0), repeat(psi0), repeat(nu0), repeat(alpha), repeat(eps),
+        repeat(seed), repeat(social_degree), repeat(trials_run),
+        max_workers=threads, chunksize=1, desc="Running Fast C Comparison"
     )
 
-    # Organize the results back into lists for plotting
-    cost_dict = {1: [], 3: []}
-    for k_val in k_values:
-        cost_dict[k_val] = [res[2] for res in results if res[0] == k_val]
+    fig, axes = plt.subplots(3, 2, figsize=(12, 10), sharex=True, dpi=300,
+                             facecolor='w')
+    pct_colors = {
+        pct: cm.batlow(x) for pct, x in zip(
+            feedback_pcts, np.linspace(0.2, 0.8, len(feedback_pcts))
+        )
+    }
+    line_styles = {1: '-', 3: '--'}
+    metric_map = [
+        ('Final Total Cost', 4),
+        ('Final Mean Desire', 5),
+        ('Final Mean Boldness', 6),
+    ]
 
-    fig, ax = plt.subplots(figsize=(7, 5), dpi=300, facecolor='w')
-    colors = [cm.batlow(0.2), cm.batlow(0.8)] # Adjusted to just two distinct colors
-    
-    for idx, k in enumerate(k_values):
-        # Make the legend labels descriptive
-        label = 'Single Param (k=1)' if k == 1 else 'Multi Param Sphere (k=3)'
-        ax.plot(C_values, cost_dict[k], label=label, color=colors[idx], marker='o', markersize=4)
+    for col, (scenario_key, scenario_label) in enumerate(scenarios):
+        scenario_results = [res for res in results if res[0] == scenario_key]
+        for row, (ylabel, idx) in enumerate(metric_map):
+            ax = axes[row, col]
+            for pct in feedback_pcts:
+                for k in k_values:
+                    series = [res[idx] for res in scenario_results
+                              if res[1] == k and np.isclose(res[3], pct)]
+                    label = f'{int(round(100 * pct))}% , k={k}'
+                    ax.plot(C_values, series, color=pct_colors[pct],
+                            linestyle=line_styles[k], marker='o',
+                            markersize=3.5, label=label)
 
-    ax.set_xlabel('Constant C (Change in Desire)')
-    ax.set_ylabel('Final Total Cost')
-    ax.set_title('Single vs Multi Param RMHC (Sphere): C vs Cost')
-    ax.set_xlim([0, max(C_values)])
-    ax.set_ylim(bottom=0)
-    ax.legend()
-    plt.grid(True, linestyle='--', alpha=0.7)
-    
-    plt.tight_layout()
-    fig.savefig(osp.join('..', 'figs', 'fast_c_vs_cost_k1_k3sphere.pdf'))
+            if row == 0:
+                ax.set_title(scenario_label, weight='bold')
+            if col == 0:
+                ax.set_ylabel(ylabel)
+            if row == 2:
+                ax.set_xlabel('Constant C (Desire Update Size)')
+            ax.grid(True, linestyle='--', alpha=0.7)
+            if row == 0:
+                ax.set_ylim(bottom=0)
+            elif row == 1:
+                ax.set_ylim([0, 1])
+
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='upper center', ncol=4, frameon=False)
+    fig.suptitle('RMHC with Personal vs Personal+Social Population Updates',
+                 y=0.98)
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.savefig(osp.join('..', 'figs',
+                         'fast_c_personal_vs_social_compare.pdf'))
     plt.show()
 
 def sweep_worker(idx, db, N, R, pi, tau0s, psi0s, nu0s, alpha, eps, seeds, k_mutate, pair, k3_method):
@@ -617,6 +819,13 @@ if __name__ == "__main__":
 
     parser.add_argument('--fast-c', action='store_true',
                         help='Run the fast 1-pass C vs Cost plot')
+    parser.add_argument('--feedback-pcts', type=float, nargs='+',
+                        default=[0.01, 0.03],
+                        help=('Boldness update percentages to compare in the '
+                              'fast feedback plot, e.g. 0.01 0.03'))
+    parser.add_argument('--social-degree', type=int, default=4,
+                        help=('Neighborhood size for the lightweight social '
+                              'update used in the fast feedback plot'))
 
     
     args = parser.parse_args()
@@ -627,7 +836,10 @@ if __name__ == "__main__":
         plot_fast_c_vs_cost(N=args.num_ind, R=args.rounds, delta=args.delta,
                             beta=args.beta, pi=args.pi, tau0=args.tau,
                             psi0=args.psi, nu0=args.nu, alpha=args.alpha,
-                            eps=args.epsilon, seed=args.seed,threads=args.threads)
+                            eps=args.epsilon, seed=args.seed,
+                            threads=args.threads,
+                            social_degree=args.social_degree,
+                            feedback_pcts=args.feedback_pcts)
     elif args.sweep:
         rmhc_sweep(N=args.num_ind, R=args.rounds, pi=args.pi, alpha=args.alpha,
                    eps=args.epsilon, seed=args.seed,
