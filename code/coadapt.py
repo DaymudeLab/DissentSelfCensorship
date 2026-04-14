@@ -3,8 +3,7 @@ coadapt: Co-adaptation experiment combining network-based opinion dynamics
 with an adaptive authority using random mutation hill climbing (RMHC).
 """
 
-from opt_action import opt_action, opt_actions
-from engine import b2sim, b2a, d2d, d2a, a2a, d2sim, d2max, b2b
+from opt_action import opt_actions
 
 import argparse
 from cmcrameri import cm
@@ -15,6 +14,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import os.path as osp
+from scipy.sparse import csr_matrix
 from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 
@@ -63,8 +63,7 @@ def texponential(rng, bound, scale, size):
 
 
 def coadapt_trial(G, N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps,
-                  rule='none', w=0.5, sigma_tau=0.05, sigma_psi=0.05,
-                  seed=None):
+                  rule='none', w=0.5, seed=None):
     """
     Runs a single simulation trial where the authority adapts its parameters
     via RMHC and the population adapts via a network-based rule each round.
@@ -83,8 +82,6 @@ def coadapt_trial(G, N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps,
     :param rule: a string adaptation rule in ['b2sim', 'b2a', 'd2d', 'd2a',
                  'a2a', 'd2sim', 'd2max', 'b2b', 'none']
     :param w: a float weight/shape parameter for the adaptation rule
-    :param sigma_tau: the float stddev for tolerance observation noise (> 0)
-    :param sigma_psi: the float stddev for severity observation noise (> 0)
     :param seed: an int seed for random number generation
 
     :returns: a 3xR array of the authority's parameter values
@@ -109,6 +106,13 @@ def coadapt_trial(G, N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps,
     # Initialize the population's boldness constants according to an
     # exponential distribution with the given mean.
     betas = rng.exponential(scale=beta, size=N)
+
+    # Pre-compute sparse adjacency matrix and degree vector for vectorized
+    # adaptation rules. Only needed when a rule is active.
+    if rule != 'none':
+        A = nx.adjacency_matrix(G).astype(float)
+        degrees = np.array(A.sum(axis=1)).flatten()
+        rows, cols = A.nonzero()
 
     # Set bounds on the authority's parameters.
     bounds = np.array([[0, 1],          # tau
@@ -147,14 +151,8 @@ def coadapt_trial(G, N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps,
 
         # --- Individuals act ---
         # Calculate the individuals' optimal actions based on their desired
-        # dissents, boldnesses, and (independently noisy) observations of the
-        # authority's tolerance and severity.
-        acts = np.zeros(N)
-        noisy_taus = np.minimum(np.maximum(rng.normal(tau, sigma_tau, N), 0), 1)
-        noisy_psis = np.maximum(rng.normal(psi, sigma_psi, N), 1e-3)
-        for i in range(N):
-            acts[i] = opt_action(deltas[i], betas[i], nu, pi, noisy_taus[i],
-                                 noisy_psis[i])
+        # dissents, boldnesses, and the authority's current parameters.
+        acts = opt_actions(deltas, betas, nu, pi, tau, psi)
 
         # --- Authority evaluates costs ---
         # The authority punishes any actions that it observes above tolerance.
@@ -177,24 +175,48 @@ def coadapt_trial(G, N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps,
                 alpha * pol_costs[r-1] + pun_costs[r-1]:
             params[:, r] = params[:, r-1]
 
-        # --- Population adaptation rule ---
-        # Apply the specified adaptation rule.
+        # --- Population adaptation rule (vectorized via sparse matrix) ---
         if rule == 'b2sim':
-            betas = b2sim(G, deltas, acts, shape=w)
+            # Boldness from similarity: mean |delta_i - a_j| over neighbors.
+            abs_diffs = np.abs(deltas[rows] - acts[cols])
+            diff_mat = csr_matrix((abs_diffs, (rows, cols)), shape=A.shape)
+            new_betas = np.array(diff_mat.sum(axis=1)).flatten() / degrees
+            new_betas = np.clip(new_betas, 1e-6, 1 - 1e-6)
+            betas = w * (1 / new_betas - 1)
         elif rule == 'd2sim':
-            betas = d2sim(G, deltas, acts, shape=w)
+            # Boldness from inverse-distance similarity.
+            abs_diffs = np.maximum(np.abs(deltas[rows] - acts[cols]), 1e-6)
+            inv_mat = csr_matrix((1.0 / abs_diffs, (rows, cols)), shape=A.shape)
+            avg_inv = np.array(inv_mat.sum(axis=1)).flatten() / degrees
+            new_betas = 1.0 / avg_inv
+            new_betas = np.clip(new_betas, 1e-6, 1 - 1e-6)
+            betas = w * (1 / new_betas - 1)
         elif rule == 'b2a':
-            betas = b2a(G, acts, shape=w)
+            # Boldness from max neighbor action.
+            max_acts = np.zeros(N)
+            np.maximum.at(max_acts, rows, acts[cols])
+            new_betas = 1 - max_acts
+            new_betas = np.clip(new_betas, 1e-6, 1 - 1e-6)
+            betas = w * (1 / new_betas - 1)
         elif rule == 'd2max':
-            betas = d2max(G, acts, shape=w)
+            # Same as b2a (kept for naming consistency with report).
+            max_acts = np.zeros(N)
+            np.maximum.at(max_acts, rows, acts[cols])
+            new_betas = 1 - max_acts
+            new_betas = np.clip(new_betas, 1e-6, 1 - 1e-6)
+            betas = w * (1 / new_betas - 1)
         elif rule == 'b2b':
-            betas = b2b(G, betas, w)
+            # Boldness averaging over neighbors.
+            betas = (w * betas + np.array(A @ betas).flatten()) / (w + degrees)
         elif rule == 'd2d':
-            deltas = d2d(G, deltas, w)
+            # Desire averaging over neighbors.
+            deltas = w * deltas + (1 - w) * np.array(A @ deltas).flatten() / degrees
         elif rule == 'd2a':
-            deltas = d2a(G, deltas, acts, w)
+            # Desire adapts toward neighbors' actions.
+            deltas = w * deltas + (1 - w) * np.array(A @ acts).flatten() / degrees
         elif rule == 'a2a' and r > 0:
-            acts = a2a(G, acts, act_hist[:, r-1], w)
+            # Action adapts toward neighbors' previous actions.
+            acts = w * acts + (1 - w) * np.array(A @ act_hist[:, r-1]).flatten() / degrees
 
         # Record desired dissents, boldnesses, and actions in history.
         delta_hist[:, r + 1] = np.copy(deltas)
@@ -206,7 +228,7 @@ def coadapt_trial(G, N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps,
 
 
 def sweep_worker(idx, db, G, N, R, pi, tau0s, psi0s, nu0s, alpha, eps,
-                 rule, w, sigma_tau, sigma_psi, seeds):
+                 rule, w, seeds):
     """
     Worker function handling the repeated co-adaptation trials for a single
     setting of (delta, beta).
@@ -225,8 +247,6 @@ def sweep_worker(idx, db, G, N, R, pi, tau0s, psi0s, nu0s, alpha, eps,
     :param eps: the float update window radius for RMHC
     :param rule: a string adaptation rule
     :param w: a float weight/shape parameter for the adaptation rule
-    :param sigma_tau: the float stddev for tolerance observation noise (> 0)
-    :param sigma_psi: the float stddev for severity observation noise (> 0)
     :param seeds: a 1xT array of int seeds for random number generation
 
     :returns: the tuple (i, j) representing this parameter setting's index
@@ -250,8 +270,7 @@ def sweep_worker(idx, db, G, N, R, pi, tau0s, psi0s, nu0s, alpha, eps,
     for t in range(len(seeds)):
         w_params[t], w_pol_costs[t], w_pun_costs[t], _, _, _, _, _ = \
             coadapt_trial(G, N, R, delta, beta, pi, tau0s[t], psi0s[t],
-                          nu0s[t], alpha, eps, rule, w, sigma_tau, sigma_psi,
-                          seeds[t])
+                          nu0s[t], alpha, eps, rule, w, seeds[t])
 
     # Return the index + means/standard deviations across trials.
     return (idx, w_params.mean(axis=0), w_params.std(axis=0),
@@ -259,8 +278,8 @@ def sweep_worker(idx, db, G, N, R, pi, tau0s, psi0s, nu0s, alpha, eps,
             w_pun_costs.mean(axis=0), w_pun_costs.std(axis=0))
 
 
-def coadapt_sweep(G, N, R, pi, alpha, eps, rule, w, sigma_tau, sigma_psi,
-                  seed, granularity, trials, threads):
+def coadapt_sweep(G, N, R, pi, alpha, eps, rule, w, seed, granularity, trials,
+                  threads):
     """
     Varying the population's mean desired dissent and boldness as independent
     variables and randomly initializing the authority's parameters, measure the
@@ -277,8 +296,6 @@ def coadapt_sweep(G, N, R, pi, alpha, eps, rule, w, sigma_tau, sigma_psi,
     :param eps: the float update window radius for RMHC
     :param rule: a string adaptation rule
     :param w: a float weight/shape parameter for the adaptation rule
-    :param sigma_tau: the float stddev for tolerance observation noise (> 0)
-    :param sigma_psi: the float stddev for severity observation noise (> 0)
     :param seed: an int seed for random number generation
     :param granularity: an int number of delta and beta values to sweep over
     :param trials: an int number of trials to run per parameter setting
@@ -308,8 +325,7 @@ def coadapt_sweep(G, N, R, pi, alpha, eps, rule, w, sigma_tau, sigma_psi,
     p = process_map(sweep_worker, idxs, dbs, repeat(G), repeat(N), repeat(R),
                     repeat(pi), repeat(tau0s), repeat(psi0s), repeat(nu0s),
                     repeat(alpha), repeat(eps), repeat(rule), repeat(w),
-                    repeat(sigma_tau), repeat(sigma_psi), repeat(seeds),
-                    max_workers=threads, chunksize=1)
+                    repeat(seeds), max_workers=threads, chunksize=1)
     for (i, j), w_params_mean, w_params_std, w_pol_costs_mean, \
             w_pol_costs_std, w_pun_costs_mean, w_pun_costs_std in p:
         params[i, j, 0] = w_params_mean
@@ -555,10 +571,6 @@ if __name__ == "__main__":
                         help='Weight/shape parameter for adaptation rule')
     parser.add_argument('--frac_a', type=float, default=0.035,
                         help='Fraction of activist individuals in the population')
-    parser.add_argument('--sigma_tau', type=float, default=0.05,
-                        help='Stddev for tolerance observation noise')
-    parser.add_argument('--sigma_psi', type=float, default=0.05,
-                        help='Stddev for severity observation noise')
     parser.add_argument('--seed', type=int, default=None,
                         help='Seed for random number generation')
     parser.add_argument('--granularity', type=int, default=50,
@@ -584,8 +596,7 @@ if __name__ == "__main__":
     if args.sweep:
         coadapt_sweep(G=G, N=args.num_ind, R=args.rounds, pi=args.pi,
                       alpha=args.alpha, eps=args.epsilon, rule=args.rule,
-                      w=args.weight, sigma_tau=args.sigma_tau,
-                      sigma_psi=args.sigma_psi, seed=args.seed,
+                      w=args.weight, seed=args.seed,
                       granularity=args.granularity, trials=args.trials,
                       threads=args.threads)
         plot_sweep(N=args.num_ind, R=args.rounds, pi=args.pi, alpha=args.alpha,
@@ -600,8 +611,7 @@ if __name__ == "__main__":
                           delta=args.delta, beta=args.beta, pi=args.pi,
                           tau0=args.tau, psi0=args.psi, nu0=args.nu,
                           alpha=args.alpha, eps=args.epsilon, rule=args.rule,
-                          w=args.weight, sigma_tau=args.sigma_tau,
-                          sigma_psi=args.sigma_psi, seed=args.seed)
+                          w=args.weight, seed=args.seed)
         plot_trial(taus, psis, nus, pol_costs, pun_costs, args.alpha, args.pi,
                    args.delta, args.beta, delta_hist, beta_hist, act_hist,
                    args.rule)
