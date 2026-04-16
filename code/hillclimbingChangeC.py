@@ -64,7 +64,21 @@ def texponential(rng, bound, scale, size):
     return samples[:size]
 
 
-def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate=1, pair='random', k3_method='sphere', C=0.0):
+def self_censor_mask(acts, deltas, atol=1e-12, rtol=1e-9):
+    """
+    Returns a boolean mask of individuals who self-censored this round, i.e.
+    whose actual action fell strictly below their desired dissent (guarding
+    against floating-point ties).
+    """
+    return (acts < deltas) & np.logical_not(
+        np.isclose(acts, deltas, atol=atol, rtol=rtol)
+    )
+
+
+def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,
+               k_mutate=1, pair='random', k3_method='sphere', C=0.0,
+               update_trigger='punished', update_target='desire',
+               boldness_pct=0.01):
     """
     Runs a single simulation trial of the model where individuals' desired
     dissents and boldness constants are exponentially-distributed but fixed and
@@ -81,12 +95,23 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate
     :param alpha: the authority's float adamancy (> 0)
     :param eps: the float update window radius for RMHC
     :param seed: an int seed for random number generation
+    :param update_trigger: what condition drives the population update —
+                           'punished'    : those caught/observed by the authority
+                           'self_censor' : those whose action < desired dissent
+    :param update_target: what gets updated each round —
+                          'desire'   : only desired dissent shifts
+                          'boldness' : only boldness shifts
+                          'all'      : both desire and boldness shift
+    :param boldness_pct: multiplicative boldness change fraction; only used
+                         when update_target is 'boldness' or 'all'
 
     :returns: a 3xR array of the authority's parameter values
     :returns: a 1xR array of the authority's political costs
     :returns: a 1xR array of the authority's punishment costs
-    :returns: a 1xN array of individuals' dissent desires
-    :returns: a 1xN array of individuals' boldness constants
+    :returns: a 1xN array of individuals' final dissent desires
+    :returns: a 1xN array of individuals' final boldness constants
+    :returns: a 1xR array of mean population desired dissent per round
+    :returns: a 1xR array of mean population boldness per round
     """
     # Set up random number generation.
     rng = np.random.default_rng(seed)
@@ -108,6 +133,7 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate
     params = np.zeros((3, R))
     pol_costs, pun_costs = np.zeros(R), np.zeros(R)
     avg_desires = np.zeros(R)  # mean population desired dissent per round
+    avg_betas   = np.zeros(R)  # mean population boldness per round
 
     #define plot params
     cands_history = []
@@ -212,67 +238,115 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate
                 alpha * pol_costs[r-1] + pun_costs[r-1]:
             params[:, r] = params[:, r-1]
 
-        #Now the people who were punished or not punished will change their desires
-        #cond (boolean array) is the people who were observed acting above tolerance
-        if C>0:
-            deltas = np.where(cond,
-                            np.minimum(1,deltas + C), #everyone who was punished 
-                            np.maximum(0,deltas - C) #everyone not punished, we would habe to change this if C was proportional to pi
-            )
+        # Population update: pick the trigger mask first, then apply to
+        # whichever targets are selected.
+        #   update_trigger 'punished'   -> mask = those caught by authority
+        #   update_trigger 'self_censor'-> mask = those who held back
+        #   update_target  'desire'     -> shift desired dissent only
+        #   update_target  'boldness'   -> shift boldness only
+        #   update_target  'all'        -> shift both
+        if C > 0 or update_target in ('boldness', 'all'):
+            if update_trigger == 'punished':
+                mask = cond
+            else:  # self_censor
+                mask = self_censor_mask(acts, deltas)
 
-        # Record the population's mean desired dissent after this round's update.
+            if update_target in ('desire', 'all'):
+                deltas = np.where(mask,
+                                  np.minimum(1, deltas + C),
+                                  np.maximum(0, deltas - C))
+
+            if update_target in ('boldness', 'all'):
+                betas = np.where(mask,
+                                 np.maximum(1e-9, betas * (1 - boldness_pct)),
+                                 np.maximum(1e-9, betas * (1 + boldness_pct)))
+
+        # Record mean population desire and boldness after this round's update.
         avg_desires[r] = deltas.mean()
+        avg_betas[r]   = betas.mean()
 
     #after getting all params, plot!
     #_plot_candidates_2d(cands_history)
 
-    return params, pol_costs, pun_costs, deltas, betas, avg_desires
+    return params, pol_costs, pun_costs, deltas, betas, avg_desires, avg_betas
 
-def fast_c_worker(k, C, N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed, trials=5):
+def fast_c_worker(k, C, N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps,
+                  seed, update_trigger, update_target, boldness_pct, trials=5):
     """
     Worker function to run multiple C vs Cost trials and average them.
 
     Also captures the full parameter and cost trajectories from the first
     (representative) trial so that plot_trial can be called per C value.
 
-    :returns: k, C, mean final cost, rep_params, rep_pol_costs, rep_pun_costs
+    :returns: k, C, update_trigger, update_target, boldness_pct, mean final cost,
+              rep_params, rep_pol_costs, rep_pun_costs,
+              rep_avg_desires, rep_avg_betas
     """
     final_costs = []
-    rep_params = rep_pol_costs = rep_pun_costs = None  # representative trial data
+    rep_params = rep_pol_costs = rep_pun_costs = None
+    rep_avg_desires = rep_avg_betas = None
 
     for t in range(trials):
         # Give each trial a unique seed.
         trial_seed = seed + t if seed is not None else None
 
-        params, pol_costs, pun_costs, _, _, avg_desires = rmhc_trial(
+        params, pol_costs, pun_costs, _, _, avg_desires, avg_betas = rmhc_trial(
             N, R, delta, beta, pi, tau0, psi0, nu0, alpha,
-            eps, trial_seed, k_mutate=k, k3_method='sphere', C=C
+            eps, trial_seed, k_mutate=k, k3_method='sphere', C=C,
+            update_trigger=update_trigger, update_target=update_target,
+            boldness_pct=boldness_pct
         )
         final_costs.append(alpha * pol_costs[-1] + pun_costs[-1])
 
-        # Keep the first trial as the representative trajectory.
         if t == 0:
-            rep_params, rep_pol_costs, rep_pun_costs = params, pol_costs, pun_costs
+            rep_params      = params
+            rep_pol_costs   = pol_costs
+            rep_pun_costs   = pun_costs
             rep_avg_desires = avg_desires
+            rep_avg_betas   = avg_betas
 
-    # Return the average final cost and the representative trial's full data.
-    return k, C, np.mean(final_costs), rep_params, rep_pol_costs, rep_pun_costs, rep_avg_desires
+    return (k, C, update_trigger, update_target, boldness_pct,
+            np.mean(final_costs),
+            rep_params, rep_pol_costs, rep_pun_costs,
+            rep_avg_desires, rep_avg_betas)
 
-def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed, threads):
+def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps,
+                        seed, threads, update_trigger='punished',
+                        update_target='desire', boldness_pct=0.01):
     """
-    Evaluates C vs Cost (averaged over several trials per C) and also produces
-    a full hill-climbing trial plot for every (k, C) combination.
+    Sweeps C (and boldness_pct where relevant) and produces per-round plots.
 
-    Summary plot  →  figs/fast_c_vs_cost_k1_k3sphere.pdf
-    Per-C trials  →  figs/c_trials/rmhc_trial_k{k}_C{i:03d}_c{C:.6f}.pdf
+    Summary plot  →  figs/fast_c_vs_cost_{trigger}_{target}.pdf
+    Authority     →  figs/c_trials/
+    Population    →  figs/c_trials_population/
+
+    Filename convention:
+      rmhc_trial_k{k}_C{i:03d}_c{C:.6f}_bp{j:03d}_b{bp:.4f}_{trigger}_{target}.pdf
+
+    bp sweep only runs when update_target is 'boldness' or 'all'.
+    For 'desire' only, bp is fixed at 0.0 and skipped from the filename.
+
+    :param update_trigger: 'punished' or 'self_censor'
+    :param update_target:  'desire', 'boldness', or 'all'
+    :param boldness_pct:   upper bound of the bp sweep (ignored for 'desire')
     """
-    C_values = np.linspace(0, 0.005, 11)
+    # C sweep only makes sense when desire is being updated.
+    # bp sweep only makes sense when boldness is being updated.
+    if update_target == 'boldness':
+        C_values  = np.array([0.0])       # C has no effect, fix at 0
+        bp_values = np.linspace(0, boldness_pct, 11)
+    elif update_target == 'desire':
+        C_values  = np.linspace(0, 0.01, 11)
+        bp_values = np.array([0.0])       # bp has no effect, fix at 0
+    else:  # 'all' — sweep both
+        C_values  = np.linspace(0, 0.01, 11)
+        bp_values = np.linspace(0, boldness_pct, 11)
     k_values = [1, 3]
 
-    # Using threads to speed up.
-    tasks = list(product(k_values, C_values))
-    ks = [t[0] for t in tasks]
-    Cs = [t[1] for t in tasks]
+    tasks = list(product(k_values, C_values, bp_values))
+    ks  = [t[0] for t in tasks]
+    Cs  = [t[1] for t in tasks]
+    bps = [t[2] for t in tasks]
 
     trials_run = 5
 
@@ -280,102 +354,115 @@ def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed
         fast_c_worker, ks, Cs,
         repeat(N), repeat(R), repeat(delta), repeat(beta), repeat(pi),
         repeat(tau0), repeat(psi0), repeat(nu0), repeat(alpha), repeat(eps),
-        repeat(seed), repeat(trials_run),
-        max_workers=threads, chunksize=1, desc="Running Fast C Pass"
+        repeat(seed), repeat(update_trigger), repeat(update_target),
+        bps, repeat(trials_run),
+        max_workers=threads, chunksize=1,
+        desc=f"Running Fast C Pass [{update_trigger} → {update_target}]"
     )
 
-    cost_dict = {1: [], 3: []}
-    for k_val in k_values:
-        cost_dict[k_val] = [res[2] for res in results if res[0] == k_val]
+    bp_colors   = {round(bp, 10): cm.batlow(x)
+                   for bp, x in zip(bp_values,
+                                    np.linspace(0.1, 0.9, len(bp_values)))}
+    line_styles = {1: '-', 3: '--'}
 
-    fig, ax = plt.subplots(figsize=(7, 5), dpi=300, facecolor='w')
-    colors = [cm.batlow(0.2), cm.batlow(0.8)]
+    fig, ax = plt.subplots(figsize=(8, 5), dpi=300, facecolor='w')
 
-    for idx, k in enumerate(k_values):
-        label = 'Single Param (k=1)' if k == 1 else 'Multi Param Sphere (k=3)'
-        ax.plot(C_values, cost_dict[k], label=label, color=colors[idx],
-                marker='o', markersize=4)
+    if update_target == 'boldness':
+        # x-axis = bp, one line per k
+        for k in k_values:
+            series = [res[5] for res in results if res[0] == k]
+            ax.plot(bp_values * 100, series,
+                    color=cm.batlow(0.2 if k == 1 else 0.8),
+                    linestyle=line_styles[k],
+                    marker='o', markersize=3,
+                    label=f'k={k}')
+        ax.set_xlabel('Boldness Update % (bp)')
+        ax.set_xlim([0, max(bp_values) * 100])
+    else:
+        # x-axis = C, lines coloured by bp
+        for k in k_values:
+            for bp in bp_values:
+                series = [res[5] for res in results
+                          if res[0] == k and np.isclose(res[4], bp)]
+                lbl = f'k={k}, bp={bp*100:.0f}%'
+                ax.plot(C_values, series,
+                        color=bp_colors[round(bp, 10)],
+                        linestyle=line_styles[k],
+                        marker='o', markersize=3, label=lbl)
+        ax.set_xlabel('Constant C (Change in Desire)')
+        ax.set_xlim([0, max(C_values)])
 
-    ax.set_xlabel('Constant C (Change in Desire)')
     ax.set_ylabel('Final Total Cost (avg over trials)')
-    ax.set_title('Single vs Multi Param RMHC (Sphere): C vs Final Cost')
-    ax.set_xlim([0, max(C_values)])
+    ax.set_title(f'RMHC: Final Cost  '
+                 f'[trigger={update_trigger}, target={update_target}]')
     ax.set_ylim(bottom=0)
-    ax.legend()
+    ax.legend(fontsize='x-small', ncol=2, frameon=False)
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.tight_layout()
-    fig.savefig(osp.join('..', 'figs', 'fast_c_vs_cost_k1_k3sphere.pdf'))
-    plt.close(fig) 
+    fig.savefig(osp.join('..', 'figs',
+                         f'fast_c_vs_cost_{update_trigger}_{update_target}.pdf'))
+    plt.close(fig)
 
-    trials_dir        = osp.join('..', 'figs', 'c_trials')
-    trials_desire_dir = osp.join('..', 'figs', 'c_trials_desire')
-    os.makedirs(trials_dir,        exist_ok=True)
-    os.makedirs(trials_desire_dir, exist_ok=True)
+    trials_dir = osp.join('..', 'figs', 'c_trials')
+    pop_dir    = osp.join('..', 'figs', 'c_trials_population')
+    os.makedirs(trials_dir, exist_ok=True)
+    os.makedirs(pop_dir,    exist_ok=True)
 
-    # Build a lookup: (k, C_rounded) -> result entry for fast access.
-    result_lookup = {(res[0], round(res[1], 10)): res for res in results}
+    result_lookup = {
+        (res[0], round(res[1], 10), round(res[4], 10)): res
+        for res in results
+    }
 
     for k in k_values:
         for i, C_val in enumerate(C_values):
-            key = (k, round(C_val, 10))
-            res = result_lookup.get(key)
-            if res is None:
-                continue
+            for j, bp in enumerate(bp_values):
+                key = (k, round(C_val, 10), round(bp, 10))
+                res = result_lookup.get(key)
+                if res is None:
+                    continue
 
-            _, _, _, rep_params, rep_pol_costs, rep_pun_costs, rep_avg_desires = res
-            taus, psis, nus = rep_params
-            fname = f'rmhc_trial_k{k}_C{i:03d}_c{C_val:.6f}.pdf'
+                (_, _, _, _, _, _, rep_params, rep_pol_costs, rep_pun_costs,
+                 rep_avg_desires, rep_avg_betas) = res
+                taus, psis, nus = rep_params
 
-            # 2-panel plot (costs + params) saved in c_trials/
-            plot_trial(taus, psis, nus, rep_pol_costs, rep_pun_costs,
-                       alpha, pi, delta, beta,
-                       title=True, k_mutate=k, k3_method='sphere',
-                       C=C_val, savepath=osp.join(trials_dir, fname))
+                fname = (f'rmhc_trial_k{k}_C{i:03d}_c{C_val:.6f}'
+                         f'_bp{j:03d}_b{bp:.4f}'
+                         f'_{update_trigger}_{update_target}.pdf')
 
-            # Standalone avg desire plot saved in c_trials_desire/
-            fig_d, ax_d = plt.subplots(figsize=(5, 3), dpi=300, layout='constrained')
-            ax_d.plot(np.arange(len(rep_avg_desires)), rep_avg_desires,
-                      label=r'Mean Desired Dissent $\bar{\delta}_r$',
-                      c=plt.cm.Purples(0.8))
-            ax_d.axhline(delta, linestyle='--', linewidth=0.8, color='grey',
-                         label=r'Initial mean $\delta$')
-            ax_d.legend(loc='best', fontsize='small')
-            ax_d.set(xlim=[0, len(rep_avg_desires)], ylim=[0, 1],
-                     xlabel=r'Round $r$', ylabel=r'Mean Desired Dissent',
-                     title=f'Avg Desire over Rounds (k={k}, C={C_val:.6f})')
-            fig_d.savefig(osp.join(trials_desire_dir, fname))
-            plt.close(fig_d)
+                # Authority plot: costs + params per round
+                plot_trial(taus, psis, nus, rep_pol_costs, rep_pun_costs,
+                           alpha, pi, delta, beta,
+                           title=True, k_mutate=k, k3_method='sphere',
+                           C=C_val, savepath=osp.join(trials_dir, fname))
 
-#visualize params
-def _plot_candidates_2d(cands_history, plane='tau-psi', every=1):
-    """
-    ONly draw candidate params with 2D （project the param on the plane)
-    :param cands_history: list of 1x3 arrays in order [tau, psi, nu] for each round's candidate
-    :param plane: 'tau-psi' | 'tau-nu' | 'psi-nu'
-    :param every: int
-    """
-    if not cands_history:
-        return
-    C = np.asarray(cands_history)[::max(1, int(every))]
-    if plane == 'tau-psi':
-        x, y = C[:, 0], C[:, 1]; xlab, ylab = 'tau', 'psi'
-    elif plane == 'tau-nu':
-        x, y = C[:, 0], C[:, 2]; xlab, ylab = 'tau', 'nu'
-    else:  # 'psi-nu'
-        x, y = C[:, 1], C[:, 2]; xlab, ylab = 'psi', 'nu'
+                # Population plot: avg desire (top) + avg boldness (bottom)
+                fig_p, ax_p = plt.subplots(2, 1, figsize=(5, 4), sharex=True,
+                                           dpi=300, layout='constrained')
+                rounds = np.arange(len(rep_avg_desires))
 
-    plt.figure(figsize=(6, 5))
-    plt.scatter(x, y, s=8, alpha=0.5)
-    plt.xlabel(xlab); plt.ylabel(ylab)
-    plt.title(f"Candidate parameters per round ({xlab} vs {ylab})")
-    
-    # visualized boundry（tau/nu ∈ [0,1]；psi ≥ 0）
-    if xlab in ('tau', 'nu'): plt.xlim(-0.02, 1.02)
-    if ylab in ('tau', 'nu'): plt.ylim(-0.02, 1.02)
-    if xlab == 'psi': plt.xlim(left=0)
-    if ylab == 'psi': plt.ylim(bottom=0)
-    plt.tight_layout()
-    plt.show()
+                ax_p[0].plot(rounds, rep_avg_desires,
+                             c=plt.cm.Purples(0.8),
+                             label=r'Mean Desired Dissent $\bar{\delta}_r$')
+                ax_p[0].axhline(delta, linestyle='--', linewidth=0.8,
+                                color='grey', label=r'Initial mean $\delta$')
+                ax_p[0].legend(loc='best', fontsize='small')
+                ax_p[0].set(ylim=[0, 1], ylabel=r'Mean Desired Dissent',
+                            title=(f'Population Dynamics  (k={k}, '
+                                   f'C={C_val:.4f}, bp={bp*100:.0f}%, '
+                                   f'{update_trigger}→{update_target})'))
+
+                ax_p[1].plot(rounds, rep_avg_betas,
+                             c=plt.cm.Oranges(0.7),
+                             label=r'Mean Boldness $\bar{\beta}_r$')
+                ax_p[1].axhline(beta, linestyle='--', linewidth=0.8,
+                                color='grey', label=r'Initial mean $\beta$')
+                ax_p[1].legend(loc='best', fontsize='small')
+                ax_p[1].set(xlim=[0, len(rep_avg_desires)],
+                            xlabel=r'Round $r$',
+                            ylabel=r'Mean Boldness', ylim=[0, None])
+
+                fig_p.savefig(osp.join(pop_dir, fname))
+                plt.close(fig_p)
 
 
 def sweep_worker(idx, db, N, R, pi, tau0s, psi0s, nu0s, alpha, eps, seeds, k_mutate, pair, k3_method):
@@ -415,7 +502,7 @@ def sweep_worker(idx, db, N, R, pi, tau0s, psi0s, nu0s, alpha, eps, seeds, k_mut
     # Run the specified number of trials for this parameter setting.
     delta, beta = db
     for t in range(len(seeds)):
-        w_params[t], w_pol_costs[t], w_pun_costs[t], _, _, _ = \
+        w_params[t], w_pol_costs[t], w_pun_costs[t], _, _, _, _ = \
             rmhc_trial(N, R, delta, beta, pi, tau0s[t], psi0s[t], nu0s[t],
                        alpha, eps, seeds[t], k_mutate, pair, k3_method)
 
@@ -720,6 +807,22 @@ if __name__ == "__main__":
 
     parser.add_argument('--fast-c', action='store_true',
                         help='Run the fast 1-pass C vs Cost plot')
+    parser.add_argument('--update-trigger',
+                        choices=['punished', 'self_censor'],
+                        default='punished',
+                        help=('What condition drives the population update: '
+                              '"punished" uses those caught by the authority; '
+                              '"self_censor" uses those who held back'))
+    parser.add_argument('--update-target',
+                        choices=['desire', 'boldness', 'all'],
+                        default='desire',
+                        help=('What gets updated each round: '
+                              '"desire" shifts desired dissent only; '
+                              '"boldness" shifts boldness only; '
+                              '"all" shifts both'))
+    parser.add_argument('--boldness-pct', type=float, default=0.10,
+                        help=('Upper bound of the boldness_pct sweep when '
+                              '--update-target is boldness or all (default 0.10)'))
 
     
     args = parser.parse_args()
@@ -730,7 +833,11 @@ if __name__ == "__main__":
         plot_fast_c_vs_cost(N=args.num_ind, R=args.rounds, delta=args.delta,
                             beta=args.beta, pi=args.pi, tau0=args.tau,
                             psi0=args.psi, nu0=args.nu, alpha=args.alpha,
-                            eps=args.epsilon, seed=args.seed,threads=args.threads)
+                            eps=args.epsilon, seed=args.seed,
+                            threads=args.threads,
+                            update_trigger=args.update_trigger,
+                            update_target=args.update_target,
+                            boldness_pct=args.boldness_pct)
     elif args.sweep:
         rmhc_sweep(N=args.num_ind, R=args.rounds, pi=args.pi, alpha=args.alpha,
                    eps=args.epsilon, seed=args.seed,
@@ -742,12 +849,16 @@ if __name__ == "__main__":
         plot_suppression_times(N=args.num_ind, R=args.rounds, pi=args.pi,
                                alpha=args.alpha, seed=args.seed)
     else:
-        (taus, psis, nus), pol_costs, pun_costs, deltas, betas, avg_desires = \
+        (taus, psis, nus), pol_costs, pun_costs, deltas, betas, avg_desires, avg_betas = \
             rmhc_trial(N=args.num_ind, R=args.rounds, delta=args.delta,
                        beta=args.beta, pi=args.pi, tau0=args.tau,
                        psi0=args.psi, nu0=args.nu, alpha=args.alpha,
                        eps=args.epsilon, seed=args.seed,
-                       k_mutate=args.k_mutate, pair=args.pair, k3_method=args.k3_method)
+                       k_mutate=args.k_mutate, pair=args.pair,
+                       k3_method=args.k3_method,
+                       update_trigger=args.update_trigger,
+                       update_target=args.update_target,
+                       boldness_pct=args.boldness_pct)
         plot_trial(taus, psis, nus, pol_costs, pun_costs, args.alpha, args.pi,
                    args.delta, args.beta, title=False,
                    k_mutate=args.k_mutate, pair=args.pair, k3_method=args.k3_method)
