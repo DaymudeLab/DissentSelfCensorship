@@ -107,7 +107,8 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate
     # Set up arrays to store everything that happens.
     params = np.zeros((3, R))
     pol_costs, pun_costs = np.zeros(R), np.zeros(R)
-    
+    avg_desires = np.zeros(R)  # mean population desired dissent per round
+
     #define plot params
     cands_history = []
 
@@ -218,11 +219,14 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,k_mutate
                             np.minimum(1,deltas + C), #everyone who was punished 
                             np.maximum(0,deltas - C) #everyone not punished, we would habe to change this if C was proportional to pi
             )
-            
+
+        # Record the population's mean desired dissent after this round's update.
+        avg_desires[r] = deltas.mean()
+
     #after getting all params, plot!
     #_plot_candidates_2d(cands_history)
 
-    return params, pol_costs, pun_costs, deltas, betas
+    return params, pol_costs, pun_costs, deltas, betas, avg_desires
 
 def fast_c_worker(k, C, N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed, trials=5):
     """
@@ -240,7 +244,7 @@ def fast_c_worker(k, C, N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed
         # Give each trial a unique seed.
         trial_seed = seed + t if seed is not None else None
 
-        params, pol_costs, pun_costs, _, _ = rmhc_trial(
+        params, pol_costs, pun_costs, _, _, avg_desires = rmhc_trial(
             N, R, delta, beta, pi, tau0, psi0, nu0, alpha,
             eps, trial_seed, k_mutate=k, k3_method='sphere', C=C
         )
@@ -249,16 +253,20 @@ def fast_c_worker(k, C, N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed
         # Keep the first trial as the representative trajectory.
         if t == 0:
             rep_params, rep_pol_costs, rep_pun_costs = params, pol_costs, pun_costs
+            rep_avg_desires = avg_desires
 
     # Return the average final cost and the representative trial's full data.
-    return k, C, np.mean(final_costs), rep_params, rep_pol_costs, rep_pun_costs
+    return k, C, np.mean(final_costs), rep_params, rep_pol_costs, rep_pun_costs, rep_avg_desires
 
 def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed, threads):
     """
     Evaluates C vs Cost (averaged over several trials per C) and also produces
     a full hill-climbing trial plot for every (k, C) combination.
+
+    Summary plot  →  figs/fast_c_vs_cost_k1_k3sphere.pdf
+    Per-C trials  →  figs/c_trials/rmhc_trial_k{k}_C{i:03d}_c{C:.6f}.pdf
     """
-    C_values = np.linspace(0, 0.01, 11)
+    C_values = np.linspace(0, 0.005, 11)
     k_values = [1, 3]
 
     # Using threads to speed up.
@@ -275,7 +283,6 @@ def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed
         repeat(seed), repeat(trials_run),
         max_workers=threads, chunksize=1, desc="Running Fast C Pass"
     )
-
 
     cost_dict = {1: [], 3: []}
     for k_val in k_values:
@@ -298,10 +305,12 @@ def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.tight_layout()
     fig.savefig(osp.join('..', 'figs', 'fast_c_vs_cost_k1_k3sphere.pdf'))
-    plt.close(fig)  
+    plt.close(fig) 
 
-    trials_dir = osp.join('..', 'figs', 'c_trials')
-    os.makedirs(trials_dir, exist_ok=True)
+    trials_dir        = osp.join('..', 'figs', 'c_trials')
+    trials_desire_dir = osp.join('..', 'figs', 'c_trials_desire')
+    os.makedirs(trials_dir,        exist_ok=True)
+    os.makedirs(trials_desire_dir, exist_ok=True)
 
     # Build a lookup: (k, C_rounded) -> result entry for fast access.
     result_lookup = {(res[0], round(res[1], 10)): res for res in results}
@@ -313,17 +322,29 @@ def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed
             if res is None:
                 continue
 
-            _, _, _, rep_params, rep_pol_costs, rep_pun_costs = res
+            _, _, _, rep_params, rep_pol_costs, rep_pun_costs, rep_avg_desires = res
             taus, psis, nus = rep_params
-
-            # File name encodes k, zero-padded index, and exact C value.
             fname = f'rmhc_trial_k{k}_C{i:03d}_c{C_val:.6f}.pdf'
-            savepath = osp.join(trials_dir, fname)
 
+            # 2-panel plot (costs + params) saved in c_trials/
             plot_trial(taus, psis, nus, rep_pol_costs, rep_pun_costs,
                        alpha, pi, delta, beta,
                        title=True, k_mutate=k, k3_method='sphere',
-                       C=C_val, savepath=savepath)
+                       C=C_val, savepath=osp.join(trials_dir, fname))
+
+            # Standalone avg desire plot saved in c_trials_desire/
+            fig_d, ax_d = plt.subplots(figsize=(5, 3), dpi=300, layout='constrained')
+            ax_d.plot(np.arange(len(rep_avg_desires)), rep_avg_desires,
+                      label=r'Mean Desired Dissent $\bar{\delta}_r$',
+                      c=plt.cm.Purples(0.8))
+            ax_d.axhline(delta, linestyle='--', linewidth=0.8, color='grey',
+                         label=r'Initial mean $\delta$')
+            ax_d.legend(loc='best', fontsize='small')
+            ax_d.set(xlim=[0, len(rep_avg_desires)], ylim=[0, 1],
+                     xlabel=r'Round $r$', ylabel=r'Mean Desired Dissent',
+                     title=f'Avg Desire over Rounds (k={k}, C={C_val:.6f})')
+            fig_d.savefig(osp.join(trials_desire_dir, fname))
+            plt.close(fig_d)
 
 #visualize params
 def _plot_candidates_2d(cands_history, plane='tau-psi', every=1):
@@ -394,7 +415,7 @@ def sweep_worker(idx, db, N, R, pi, tau0s, psi0s, nu0s, alpha, eps, seeds, k_mut
     # Run the specified number of trials for this parameter setting.
     delta, beta = db
     for t in range(len(seeds)):
-        w_params[t], w_pol_costs[t], w_pun_costs[t], _, _ = \
+        w_params[t], w_pol_costs[t], w_pun_costs[t], _, _, _ = \
             rmhc_trial(N, R, delta, beta, pi, tau0s[t], psi0s[t], nu0s[t],
                        alpha, eps, seeds[t], k_mutate, pair, k3_method)
 
@@ -721,7 +742,7 @@ if __name__ == "__main__":
         plot_suppression_times(N=args.num_ind, R=args.rounds, pi=args.pi,
                                alpha=args.alpha, seed=args.seed)
     else:
-        (taus, psis, nus), pol_costs, pun_costs, deltas, betas = \
+        (taus, psis, nus), pol_costs, pun_costs, deltas, betas, avg_desires = \
             rmhc_trial(N=args.num_ind, R=args.rounds, delta=args.delta,
                        beta=args.beta, pi=args.pi, tau0=args.tau,
                        psi0=args.psi, nu0=args.nu, alpha=args.alpha,
