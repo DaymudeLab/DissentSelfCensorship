@@ -134,6 +134,21 @@ def update_population_personal_social(deltas, betas, acts, C, boldness_pct,
     return new_deltas, np.maximum(1e-9, new_betas)
 
 
+def update_boldness_from_punishment(betas, punished, boldness_pct,
+                                    beta_floor=1e-9):
+    """
+    Updates boldness using punishment as the trigger.
+
+    Punished individuals become less bold; unpunished individuals become more
+    bold. The update is multiplicative so the effect compounds over rounds.
+    """
+    return np.where(
+        punished,
+        np.maximum(beta_floor, betas * (1 - boldness_pct)),
+        np.maximum(beta_floor, betas * (1 + boldness_pct))
+    )
+
+
 def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,
                k_mutate=1, k3_method='sphere', C=0.0):
     """
@@ -280,6 +295,7 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,
     #_plot_candidates_2d(cands_history)
 
     return params, pol_costs, pun_costs, deltas, betas
+
 
 def feedback_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,
                    k_mutate, k3_method, C, boldness_pct,
@@ -460,6 +476,131 @@ def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps,
             else 'fast_c_personal_plus_social.pdf'
         fig.savefig(osp.join('..', 'figs', filename))
         plt.show()
+
+
+def punishment_feedback_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha,
+                              eps, seed, k_mutate=1, k3_method='sphere',
+                              boldness_pct=0.01):
+    """
+    Runs an RMHC trial where desired dissent stays fixed (C = 0) and boldness
+    alone changes over time based on whether an individual was punished.
+
+    :returns: authority params, political costs, punishment costs, mean boldness
+              by round, punishment rate by round, final deltas, final betas
+    """
+    rng = np.random.default_rng(seed)
+    deltas = texponential(rng, bound=1, scale=delta, size=N)
+    betas = rng.exponential(scale=beta, size=N)
+    bounds = np.array([[0, 1], [1e-9, np.inf], [0, 1]])
+
+    params = np.zeros((3, R))
+    pol_costs, pun_costs = np.zeros(R), np.zeros(R)
+    mean_betas = np.zeros(R)
+    punishment_rates = np.zeros(R)
+
+    for r in range(R):
+        if r == 0:
+            params[:, r] = [tau0, psi0, nu0]
+        else:
+            candidate_params = np.copy(params[:, r-1])
+
+            if k_mutate == 1:
+                idx = rng.integers(3)
+                low = max(bounds[idx, 0], candidate_params[idx] - eps)
+                high = min(bounds[idx, 1], candidate_params[idx] + eps)
+                candidate_params[idx] = rng.uniform(low, high)
+            else:
+                if k3_method == 'box':
+                    for p in range(3):
+                        low = max(bounds[p, 0], candidate_params[p] - eps)
+                        high = min(bounds[p, 1], candidate_params[p] + eps)
+                        candidate_params[p] = rng.uniform(low, high)
+                elif k3_method == 'sphere':
+                    angle = rng.normal(size=3)
+                    angle /= np.linalg.norm(angle)
+                    candidate_params += angle * eps
+
+                candidate_params[0] = np.clip(candidate_params[0], bounds[0, 0],
+                                              bounds[0, 1])
+                candidate_params[1] = max(candidate_params[1], bounds[1, 0])
+                candidate_params[2] = np.clip(candidate_params[2], bounds[2, 0],
+                                              bounds[2, 1])
+
+            params[:, r] = candidate_params
+
+        tau, psi, nu = params[:, r]
+        acts = opt_actions(deltas, betas, nu, pi, tau, psi)
+        punished = (acts > tau) & (rng.random(N) < (nu + (1 - nu) * acts))
+
+        if pi == 'uniform':
+            punish = punished * psi
+        elif pi == 'proportional':
+            punish = punished * psi * (acts - tau)
+        else:
+            assert False, f'ERROR: Invalid punishment function \"{pi}\"'
+
+        pol_costs[r] = acts.sum()
+        pun_costs[r] = punish.sum()
+
+        if r > 0 and alpha * pol_costs[r] + pun_costs[r] > \
+                alpha * pol_costs[r-1] + pun_costs[r-1]:
+            params[:, r] = params[:, r-1]
+
+        betas = update_boldness_from_punishment(
+            betas, punished, boldness_pct=boldness_pct
+        )
+        mean_betas[r] = betas.mean()
+        punishment_rates[r] = punished.mean()
+
+    return (params, pol_costs, pun_costs, mean_betas, punishment_rates,
+            deltas, betas)
+
+
+def plot_punishment_feedback_trial(taus, psis, nus, pol_costs, pun_costs,
+                                   mean_betas, punishment_rates, alpha, pi,
+                                   delta, beta, boldness_pct, k_mutate,
+                                   k3_method):
+    """
+    Plots round-by-round outcomes when punishment updates boldness and
+    desire is fixed.
+    """
+    R = len(taus)
+    fig, ax = plt.subplots(3, 1, figsize=(7, 8), sharex=True, dpi=300,
+                           layout='constrained')
+
+    ax[0].plot(np.arange(R), alpha * pol_costs, label='Political Cost',
+               c=cm.vikO(0.3))
+    ax[0].plot(np.arange(R), pun_costs, label='Punishment Cost',
+               c=cm.vikO(0.7))
+    ax[0].plot(np.arange(R), alpha * pol_costs + pun_costs, label='Total Cost',
+               c=cm.vikO(0.0))
+    ax[0].legend(loc='best', fontsize='small')
+    ax[0].set(ylabel='Cost')
+    ax[0].set_title('Punishment-Driven Boldness Feedback (C = 0)', weight='bold')
+
+    ax[1].plot(np.arange(R), mean_betas, label='Mean Boldness',
+               c=cm.batlow(0.8))
+    ax[1].plot(np.arange(R), punishment_rates, label='Punishment Rate',
+               c=cm.batlow(0.2))
+    ax[1].legend(loc='best', fontsize='small')
+    ax[1].set(ylabel='Population State')
+
+    ax[2].plot(np.arange(R), taus, label=r'Tolerance $\tau_r$',
+               c=plt.cm.Blues(0.9))
+    ax[2].plot(np.arange(R), psis, label=r'Severity $\psi_r$',
+               c=plt.cm.Reds(0.8))
+    ax[2].plot(np.arange(R), nus, label=r'Surveillance $\nu_r$',
+               c=plt.cm.Greens(0.7))
+    ax[2].legend(loc='best', fontsize='small')
+    ax[2].set(xlabel=r'Round $r$', ylabel='Authority Params', xlim=[0, R])
+
+    suffix = f"_k{k_mutate}"
+    if k_mutate == 3:
+        suffix += f"_{k3_method}"
+    pct_tag = int(round(100 * boldness_pct))
+    fig.savefig(osp.join('..', 'figs',
+                         f'punishment_feedback_boldness_bp{pct_tag}{suffix}.pdf'))
+
 
 def sweep_worker(idx, db, N, R, pi, tau0s, psi0s, nu0s, alpha, eps, seeds,
                  k_mutate, k3_method):
@@ -789,6 +930,9 @@ if __name__ == "__main__":
 
     parser.add_argument('--fast-c', action='store_true',
                         help='Run the fast 1-pass C vs Cost plot')
+    parser.add_argument('--punishment-feedback', action='store_true',
+                        help=('Run a round-by-round RMHC trial where '
+                              'punishment updates boldness and C is fixed at 0'))
     parser.add_argument('--feedback-pcts', type=float, nargs='+',
                         default=[0.01, 0.03],
                         help=('Boldness update percentages to compare in the '
@@ -796,13 +940,31 @@ if __name__ == "__main__":
     parser.add_argument('--social-degree', type=int, default=4,
                         help=('Neighborhood size for the lightweight social '
                               'update used in the fast feedback plot'))
+    parser.add_argument('--boldness-pct', type=float, default=0.01,
+                        help=('Punishment-feedback boldness percentage, e.g. '
+                              '0.01 for 1%%'))
 
     
     args = parser.parse_args()
 
     # Run a single trial or sweep experiment.
     rng = np.random.default_rng(args.seed)
-    if args.fast_c:
+    if args.punishment_feedback:
+        (params, pol_costs, pun_costs, mean_betas, punishment_rates,
+         deltas, betas) = punishment_feedback_trial(
+            N=args.num_ind, R=args.rounds, delta=args.delta, beta=args.beta,
+            pi=args.pi, tau0=args.tau, psi0=args.psi, nu0=args.nu,
+            alpha=args.alpha, eps=args.epsilon, seed=args.seed,
+            k_mutate=args.k_mutate, k3_method=args.k3_method,
+            boldness_pct=args.boldness_pct
+        )
+        taus, psis, nus = params
+        plot_punishment_feedback_trial(
+            taus, psis, nus, pol_costs, pun_costs, mean_betas,
+            punishment_rates, args.alpha, args.pi, args.delta, args.beta,
+            args.boldness_pct, args.k_mutate, args.k3_method
+        )
+    elif args.fast_c:
         plot_fast_c_vs_cost(N=args.num_ind, R=args.rounds, delta=args.delta,
                             beta=args.beta, pi=args.pi, tau0=args.tau,
                             psi0=args.psi, nu0=args.nu, alpha=args.alpha,
