@@ -776,6 +776,328 @@ def plot_suppression_times(N, R, pi, alpha, seed, window=500, threshold=0.25,
                          f'suppression_times_N{N}_R{R}_{pi}_S{seed}.pdf'))
 
 
+def policy_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,
+                 k_mutate=1, k3_method='sphere', C=0.0, boldness_pct=0.01,
+                 snapshot_every=500):
+    """
+    RMHC trial where the population reacts to the authority's policy directly.
+
+    Desire update — each of the three authority parameters is compared to
+    each individual's personal threshold every round.  For each parameter:
+      tau < tau_thresh_i   → desire + C   (policy too tight)
+      tau >= tau_thresh_i  → desire - C   (policy lenient enough)
+      nu  > nu_thresh_i    → desire + C   (too much surveillance)
+      nu  <= nu_thresh_i   → desire - C   (surveillance acceptable)
+      psi > psi_thresh_i   → desire + C   (severity too high)
+      psi <= psi_thresh_i  → desire - C   (severity acceptable)
+    Net change is the sum of the three contributions (−3C to +3C per round).
+
+    Boldness update — based on punishment:
+      punished             → betas * (1 - boldness_pct)
+      not punished         → betas * (1 + boldness_pct)
+
+    Personal thresholds are drawn once at initialisation:
+      tau_thresh ~ Uniform(0, 1)
+      nu_thresh  ~ Uniform(0, 1)
+      psi_thresh ~ Exponential(mean=1.0)
+
+    Snapshots of desire distribution are taken every `snapshot_every` rounds,
+    recording the fraction of the population with desire ≈ 0, in (0,1), ≈ 1.
+
+    :returns: params, pol_costs, pun_costs, deltas, betas,
+              avg_desires (1xR), avg_betas (1xR),
+              snapshots dict with keys:
+                'rounds'   — 1D array of round indices
+                'at_zero'  — fraction with desire < 1e-6
+                'middle'   — fraction with 1e-6 <= desire <= 1-1e-6
+                'at_one'   — fraction with desire > 1-1e-6
+    """
+    rng = np.random.default_rng(seed)
+
+    # Initialise population.
+    deltas = texponential(rng, bound=1, scale=delta, size=N)
+    betas  = rng.exponential(scale=beta, size=N)
+
+    # Personal policy thresholds — drawn once, fixed for the whole trial.
+    tau_thresh = rng.uniform(0, 1,    size=N)
+    nu_thresh  = rng.uniform(0, 1,    size=N)
+    psi_thresh = rng.exponential(1.0, size=N)
+
+    # Authority parameter bounds.
+    bounds = np.array([[0, 1], [1e-9, np.inf], [0, 1]])
+
+    params      = np.zeros((3, R))
+    pol_costs   = np.zeros(R)
+    pun_costs   = np.zeros(R)
+    avg_desires = np.zeros(R)
+    avg_betas   = np.zeros(R)
+
+    # Snapshot containers — record every snapshot_every rounds.
+    snap_rounds  = []
+    snap_at_zero = []
+    snap_middle  = []
+    snap_at_one  = []
+
+    for r in range(R):
+        # ---- Authority RMHC step (identical logic to rmhc_trial) ----
+        if r == 0:
+            params[:, r] = [tau0, psi0, nu0]
+        else:
+            candidate_params = np.copy(params[:, r-1])
+            if k_mutate == 1:
+                idx  = rng.integers(3)
+                low  = max(bounds[idx, 0], candidate_params[idx] - eps)
+                high = min(bounds[idx, 1], candidate_params[idx] + eps)
+                candidate_params[idx] = rng.uniform(low, high)
+            else:  # k_mutate == 3, sphere
+                angle  = rng.normal(size=3)
+                angle /= np.linalg.norm(angle)
+                candidate_params += angle * eps
+            candidate_params[0] = np.clip(candidate_params[0], bounds[0,0], bounds[0,1])
+            candidate_params[1] = max(candidate_params[1], bounds[1,0])
+            candidate_params[2] = np.clip(candidate_params[2], bounds[2,0], bounds[2,1])
+            params[:, r] = candidate_params
+
+        # ---- Population acts ----
+        tau, psi, nu = params[:, r]
+        with np.errstate(divide='ignore', invalid='ignore'):
+            acts = opt_actions(deltas, betas, nu, pi, tau, psi)
+        acts = np.clip(np.nan_to_num(acts, nan=0.0, posinf=1.0, neginf=0.0),
+                       0.0, 1.0)
+
+        # ---- Authority observes and punishes ----
+        cond = (acts > tau) & (rng.random(N) < (nu + (1 - nu) * acts))
+        if pi == 'uniform':
+            punish = cond * psi
+        elif pi == 'proportional':
+            punish = cond * psi * (acts - tau)
+        else:
+            assert False, f'ERROR: Invalid punishment function "{pi}"'
+
+        pol_costs[r] = acts.sum()
+        pun_costs[r] = punish.sum()
+
+        # ---- Authority rolls back if costs got worse ----
+        if r > 0 and alpha * pol_costs[r] + pun_costs[r] > \
+                     alpha * pol_costs[r-1] + pun_costs[r-1]:
+            params[:, r] = params[:, r-1]
+            # Re-read tau/psi/nu after possible rollback so population
+            # update uses the params the authority actually kept.
+            tau, psi, nu = params[:, r]
+
+        # ---- Desire update: each param contributes ±C independently ----
+        if C > 0:
+            delta_desire = np.zeros(N)
+            delta_desire += np.where(tau  <  tau_thresh,  C, -C)
+            delta_desire += np.where(nu   >  nu_thresh,   C, -C)
+            delta_desire += np.where(psi  >  psi_thresh,  C, -C)
+            deltas = np.clip(deltas + delta_desire, 0.0, 1.0)
+
+        # ---- Boldness update: based on punishment ----
+        if boldness_pct > 0:
+            betas = np.where(cond,
+                             np.maximum(1e-9, betas * (1 - boldness_pct)),
+                             np.maximum(1e-9, betas * (1 + boldness_pct)))
+
+        # ---- Record per-round averages ----
+        avg_desires[r] = deltas.mean()
+        avg_betas[r]   = betas.mean()
+
+        # ---- Snapshot every snapshot_every rounds ----
+        if (r + 1) % snapshot_every == 0 or r == R - 1:
+            snap_rounds.append(r + 1)
+            snap_at_zero.append((deltas  < 1e-6).mean())
+            snap_at_one.append( (deltas  > 1 - 1e-6).mean())
+            snap_middle.append( ((deltas >= 1e-6) & (deltas <= 1 - 1e-6)).mean())
+
+    snapshots = {
+        'rounds':  np.array(snap_rounds),
+        'at_zero': np.array(snap_at_zero),
+        'middle':  np.array(snap_middle),
+        'at_one':  np.array(snap_at_one),
+    }
+    return (params, pol_costs, pun_costs, deltas, betas,
+            avg_desires, avg_betas, snapshots)
+
+
+def policy_worker(k, C, boldness_pct, N, R, delta, beta, pi, tau0, psi0, nu0,
+                  alpha, eps, seed, trials=5):
+    """
+    Worker for plot_policy_c.  Runs `trials` policy_trial calls, averages the
+    final total cost, and keeps the full trajectory from the first trial.
+
+    :returns: (k, C, boldness_pct, mean_final_cost,
+               rep_params, rep_pol_costs, rep_pun_costs,
+               rep_avg_desires, rep_avg_betas, rep_snapshots)
+    """
+    final_costs = []
+    rep = {}
+
+    for t in range(trials):
+        trial_seed = seed + t if seed is not None else None
+        (params, pol_costs, pun_costs, _, _,
+         avg_desires, avg_betas, snapshots) = policy_trial(
+            N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, trial_seed,
+            k_mutate=k, k3_method='sphere', C=C, boldness_pct=boldness_pct
+        )
+        final_costs.append(alpha * pol_costs[-1] + pun_costs[-1])
+        if t == 0:
+            rep = dict(params=params, pol_costs=pol_costs,
+                       pun_costs=pun_costs, avg_desires=avg_desires,
+                       avg_betas=avg_betas, snapshots=snapshots)
+
+    return (k, C, boldness_pct, np.mean(final_costs),
+            rep['params'], rep['pol_costs'], rep['pun_costs'],
+            rep['avg_desires'], rep['avg_betas'], rep['snapshots'])
+
+
+def plot_policy_c(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps,
+                  seed, threads, max_C=0.01, max_bp=0.10):
+    """
+    Sweeps C (5 values, 0→max_C) and boldness_pct (5 values, 0→max_bp)
+    for the policy-responsive population model.
+
+    Summary plot  →  figs/policy_summary.pdf
+    Authority     →  figs/policy_trials/
+    Population    →  figs/policy_trials_population/
+                     (avg desire + avg boldness + desire snapshot chart,
+                      all in one 3-panel PDF per run)
+
+    Filename convention:
+      policy_trial_k{k}_C{i:02d}_c{C:.6f}_bp{j:02d}_b{bp:.4f}.pdf
+
+    :param max_C:  upper bound of the C sweep
+    :param max_bp: upper bound of the boldness_pct sweep
+    """
+    C_values  = np.linspace(0, max_C,  5)
+    bp_values = np.linspace(0, max_bp, 5)
+    k_values  = [1, 3]
+
+    tasks = list(product(k_values, C_values, bp_values))
+    ks  = [t[0] for t in tasks]
+    Cs  = [t[1] for t in tasks]
+    bps = [t[2] for t in tasks]
+
+    trials_run = 5
+
+    results = process_map(
+        policy_worker, ks, Cs, bps,
+        repeat(N), repeat(R), repeat(delta), repeat(beta), repeat(pi),
+        repeat(tau0), repeat(psi0), repeat(nu0), repeat(alpha), repeat(eps),
+        repeat(seed), repeat(trials_run),
+        max_workers=threads, chunksize=1,
+        desc="Running Policy C Sweep"
+    )
+
+    bp_colors   = {round(bp, 10): cm.batlow(x)
+                   for bp, x in zip(bp_values,
+                                    np.linspace(0.1, 0.9, len(bp_values)))}
+    line_styles = {1: '-', 3: '--'}
+
+    fig_s, ax_s = plt.subplots(figsize=(8, 5), dpi=300, facecolor='w')
+    for k in k_values:
+        for bp in bp_values:
+            series = [res[3] for res in results
+                      if res[0] == k and np.isclose(res[2], bp)]
+            ax_s.plot(C_values, series,
+                      color=bp_colors[round(bp, 10)],
+                      linestyle=line_styles[k],
+                      marker='o', markersize=3,
+                      label=f'k={k}, bp={bp*100:.0f}%')
+    ax_s.set_xlabel('Constant C (Policy Response Strength)')
+    ax_s.set_ylabel('Final Total Cost (avg over trials)')
+    ax_s.set_title('Policy-Responsive Model: C vs Final Cost')
+    ax_s.set_xlim([0, max(C_values)])
+    ax_s.set_ylim(bottom=0)
+    ax_s.legend(fontsize='x-small', ncol=2, frameon=False)
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    fig_s.savefig(osp.join('..', 'figs', 'policy_summary.pdf'))
+    plt.close(fig_s)
+
+    trials_dir = osp.join('..', 'figs', 'policy_trials')
+    pop_dir    = osp.join('..', 'figs', 'policy_trials_population')
+    os.makedirs(trials_dir, exist_ok=True)
+    os.makedirs(pop_dir,    exist_ok=True)
+
+    result_lookup = {
+        (res[0], round(res[1], 10), round(res[2], 10)): res
+        for res in results
+    }
+
+    for k in k_values:
+        for i, C_val in enumerate(C_values):
+            for j, bp in enumerate(bp_values):
+                key = (k, round(C_val, 10), round(bp, 10))
+                res = result_lookup.get(key)
+                if res is None:
+                    continue
+
+                (_, _, _, _, rep_params, rep_pol_costs, rep_pun_costs,
+                 rep_avg_desires, rep_avg_betas, rep_snaps) = res
+                taus, psis, nus = rep_params
+
+                fname = (f'policy_trial_k{k}'
+                         f'_C{i:02d}_c{C_val:.6f}'
+                         f'_bp{j:02d}_b{bp:.4f}.pdf')
+
+                # -- Authority plot: costs + params (reuse plot_trial) --
+                plot_trial(taus, psis, nus, rep_pol_costs, rep_pun_costs,
+                           alpha, pi, delta, beta,
+                           title=True, k_mutate=k, k3_method='sphere',
+                           C=C_val, savepath=osp.join(trials_dir, fname))
+
+                # -- Population plot: 3 panels in one figure --
+                fig_p, ax_p = plt.subplots(3, 1, figsize=(6, 7), sharex=False,
+                                           dpi=300, layout='constrained')
+                rounds = np.arange(len(rep_avg_desires))
+
+                # Panel 1: avg desire per round
+                ax_p[0].plot(rounds, rep_avg_desires,
+                             c=plt.cm.Purples(0.8),
+                             label=r'Mean Desired Dissent $\bar{\delta}_r$')
+                ax_p[0].axhline(delta, linestyle='--', linewidth=0.8,
+                                color='grey', label=r'Initial mean $\delta$')
+                ax_p[0].legend(loc='best', fontsize='small')
+                ax_p[0].set(xlim=[0, len(rounds)], ylim=[0, 1],
+                            ylabel=r'Mean Desired Dissent',
+                            title=(f'Policy-Responsive Dynamics  '
+                                   f'(k={k}, C={C_val:.4f}, '
+                                   f'bp={bp*100:.0f}%)'))
+
+                # Panel 2: avg boldness per round
+                ax_p[1].plot(rounds, rep_avg_betas,
+                             c=plt.cm.Oranges(0.7),
+                             label=r'Mean Boldness $\bar{\beta}_r$')
+                ax_p[1].axhline(beta, linestyle='--', linewidth=0.8,
+                                color='grey', label=r'Initial mean $\beta$')
+                ax_p[1].legend(loc='best', fontsize='small')
+                ax_p[1].set(xlim=[0, len(rounds)],
+                            ylabel=r'Mean Boldness', ylim=[0, None])
+
+                # Panel 3: snapshot distribution every 500 rounds
+                snap_r  = rep_snaps['rounds']
+                at_zero = rep_snaps['at_zero']
+                middle  = rep_snaps['middle']
+                at_one  = rep_snaps['at_one']
+
+                ax_p[2].stackplot(snap_r,
+                                  at_zero, middle, at_one,
+                                  labels=['Desire ≈ 0', '0 < Desire < 1',
+                                          'Desire ≈ 1'],
+                                  colors=[plt.cm.Blues(0.4),
+                                          plt.cm.Greys(0.4),
+                                          plt.cm.Reds(0.5)],
+                                  alpha=0.85)
+                ax_p[2].legend(loc='upper right', fontsize='small')
+                ax_p[2].set(xlim=[snap_r[0], snap_r[-1]], ylim=[0, 1],
+                            xlabel=r'Round $r$',
+                            ylabel='Fraction of Population')
+
+                fig_p.savefig(osp.join(pop_dir, fname))
+                plt.close(fig_p)
+
+
 if __name__ == "__main__":
     # Parse command line arguments.
     parser = argparse.ArgumentParser(description=__doc__)
@@ -828,6 +1150,15 @@ if __name__ == "__main__":
 
     parser.add_argument('--fast-c', action='store_true',
                         help='Run the fast 1-pass C vs Cost plot')
+    parser.add_argument('--policy-c', action='store_true',
+                        help=('Run the policy-responsive population sweep: '
+                              'desire reacts to authority params via personal '
+                              'thresholds; boldness reacts to punishment'))
+    parser.add_argument('--policy-max-c', type=float, default=0.01,
+                        help='Upper bound of C sweep for --policy-c (default 0.01)')
+    parser.add_argument('--policy-max-bp', type=float, default=0.10,
+                        help=('Upper bound of boldness_pct sweep for '
+                              '--policy-c (default 0.10)'))
     parser.add_argument('--update-trigger',
                         choices=['punished', 'self_censor', 'mixed'],
                         default='punished',
@@ -852,7 +1183,15 @@ if __name__ == "__main__":
 
     # Run a single trial or sweep experiment.
     rng = np.random.default_rng(args.seed)
-    if args.fast_c:
+    if args.policy_c:
+        plot_policy_c(N=args.num_ind, R=args.rounds, delta=args.delta,
+                      beta=args.beta, pi=args.pi, tau0=args.tau,
+                      psi0=args.psi, nu0=args.nu, alpha=args.alpha,
+                      eps=args.epsilon, seed=args.seed,
+                      threads=args.threads,
+                      max_C=args.policy_max_c,
+                      max_bp=args.policy_max_bp)
+    elif args.fast_c:
         plot_fast_c_vs_cost(N=args.num_ind, R=args.rounds, delta=args.delta,
                             beta=args.beta, pi=args.pi, tau0=args.tau,
                             psi0=args.psi, nu0=args.nu, alpha=args.alpha,
