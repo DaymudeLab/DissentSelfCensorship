@@ -75,6 +75,24 @@ def self_censor_mask(acts, deltas, atol=1e-12, rtol=1e-9):
     )
 
 
+def trigger_masks(update_trigger, punished_mask, acts, deltas):
+    """
+    Returns separate masks for desire and boldness updates.
+
+    'punished'    -> both desire and boldness use punishment
+    'self_censor' -> both desire and boldness use self-censorship
+    'mixed'       -> desire uses self-censorship, boldness uses punishment
+    """
+    self_censor = self_censor_mask(acts, deltas)
+    if update_trigger == 'punished':
+        return punished_mask, punished_mask
+    if update_trigger == 'self_censor':
+        return self_censor, self_censor
+    if update_trigger == 'mixed':
+        return self_censor, punished_mask
+    assert False, f'ERROR: Invalid update trigger "{update_trigger}"'
+
+
 def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,
                k_mutate=1, pair='random', k3_method='sphere', C=0.0,
                update_trigger='punished', update_target='desire',
@@ -96,8 +114,12 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,
     :param eps: the float update window radius for RMHC
     :param seed: an int seed for random number generation
     :param update_trigger: what condition drives the population update —
-                           'punished'    : those caught/observed by the authority
-                           'self_censor' : those whose action < desired dissent
+                           'punished'    : both desire and boldness use those
+                                           caught/observed by the authority
+                           'self_censor' : both desire and boldness use those
+                                           whose action < desired dissent
+                           'mixed'       : desire uses self-censorship, while
+                                           boldness uses punishment
     :param update_target: what gets updated each round —
                           'desire'   : only desired dissent shifts
                           'boldness' : only boldness shifts
@@ -246,18 +268,17 @@ def rmhc_trial(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps, seed,
         #   update_target  'boldness'   -> shift boldness only
         #   update_target  'all'        -> shift both
         if C > 0 or update_target in ('boldness', 'all'):
-            if update_trigger == 'punished':
-                mask = cond
-            else:  # self_censor
-                mask = self_censor_mask(acts, deltas)
+            desire_mask, boldness_mask = trigger_masks(
+                update_trigger, cond, acts, deltas
+            )
 
             if update_target in ('desire', 'all'):
-                deltas = np.where(mask,
+                deltas = np.where(desire_mask,
                                   np.minimum(1, deltas + C),
                                   np.maximum(0, deltas - C))
 
             if update_target in ('boldness', 'all'):
-                betas = np.where(mask,
+                betas = np.where(boldness_mask,
                                  np.maximum(1e-9, betas * (1 - boldness_pct)),
                                  np.maximum(1e-9, betas * (1 + boldness_pct)))
 
@@ -317,8 +338,8 @@ def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps,
     Sweeps C (and boldness_pct where relevant) and produces per-round plots.
 
     Summary plot  →  figs/fast_c_vs_cost_{trigger}_{target}.pdf
-    Authority     →  figs/c_trials/
-    Population    →  figs/c_trials_population/
+    Authority     →  figs/{trigger}_{target}_trials/
+    Population    →  figs/{trigger}_{target}_population/
 
     Filename convention:
       rmhc_trial_k{k}_C{i:03d}_c{C:.6f}_bp{j:03d}_b{bp:.4f}_{trigger}_{target}.pdf
@@ -403,8 +424,8 @@ def plot_fast_c_vs_cost(N, R, delta, beta, pi, tau0, psi0, nu0, alpha, eps,
                          f'fast_c_vs_cost_{update_trigger}_{update_target}.pdf'))
     plt.close(fig)
 
-    trials_dir = osp.join('..', 'figs', 'c_trials')
-    pop_dir    = osp.join('..', 'figs', 'c_trials_population')
+    trials_dir = osp.join('..', 'figs', f'{update_trigger}_{update_target}_trials')
+    pop_dir    = osp.join('..', 'figs', f'{update_trigger}_{update_target}_population')
     os.makedirs(trials_dir, exist_ok=True)
     os.makedirs(pop_dir,    exist_ok=True)
 
@@ -808,11 +829,13 @@ if __name__ == "__main__":
     parser.add_argument('--fast-c', action='store_true',
                         help='Run the fast 1-pass C vs Cost plot')
     parser.add_argument('--update-trigger',
-                        choices=['punished', 'self_censor'],
+                        choices=['punished', 'self_censor', 'mixed'],
                         default='punished',
                         help=('What condition drives the population update: '
                               '"punished" uses those caught by the authority; '
-                              '"self_censor" uses those who held back'))
+                              '"self_censor" uses those who held back; '
+                              '"mixed" uses self-censorship for desire and '
+                              'punishment for boldness'))
     parser.add_argument('--update-target',
                         choices=['desire', 'boldness', 'all'],
                         default='desire',
